@@ -1,5 +1,3 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
 # dependencies
 node_modules/
 
@@ -31,6 +29,7 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
 
 # typescript
@@ -40,9 +39,11 @@ yarn-error.*
 /ios
 /android
 
-
 # amplify
-node_modules
 .amplify
 amplify_outputs*
 amplifyconfiguration*
+
+# tests / seed output
+coverage/
+seed-output.json
