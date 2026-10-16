@@ -96,3 +96,17 @@ alarm (15 s) and route (30 s) rate limits.
     work; re-run `SEED_EMAIL=you@… npm run seed` or add a student from the office to receive one.
 12. **Not verified on devices** in this session: background location, push delivery, voice
     recording and maps on Android/iOS hardware. Everything compiles and the web build runs.
+
+## Amplify Hosting fix (deployments 1 and 2 failed)
+
+Both console deployments died ~45 s in, during `npm ci`: `package.json` and `package-lock.json`
+had drifted apart (the lock pinned `zod@3.24.2` where a nested dependency needed `3.25.17`, and
+two `@opentelemetry/core@2.0.0` entries were missing), so `npm ci` refused to install. Fixes:
+
+- regenerated `package-lock.json` (`npm install --package-lock-only`) and verified a clean
+  `npm ci` on a scratch copy succeeds;
+- added `amplify.yml` (backend `pipeline-deploy` + frontend `expo export`, Node 22 via nvm,
+  `dist/` artifacts, npm + node_modules cache) instead of relying on the auto-detected spec;
+- added `npm run build` and `engines.node` to `package.json`, `.nvmrc`;
+- README §8 lists the console settings still needed: service role, environment variables, the
+  `GOOGLE_ROUTES_API_KEY` secret, and the SPA rewrite rule.

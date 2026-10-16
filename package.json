@@ -17,7 +17,8 @@
     "create-admin": "tsx scripts/create-admin.ts",
     "smoke": "tsx scripts/smoke.ts",
     "export:web": "expo export --platform web",
-    "doctor": "expo-doctor"
+    "doctor": "expo-doctor",
+    "build": "expo export --platform web --output-dir dist"
   },
   "jest": {
     "preset": "jest-expo",
@@ -107,5 +108,8 @@
     "jest-expo": "~57.0.6",
     "tsx": "^4.23.15",
     "typescript": "~6.0.3"
+  },
+  "engines": {
+    "node": ">=20.19.0"
   }
 }

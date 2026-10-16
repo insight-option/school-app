@@ -174,7 +174,41 @@ needs native code that `expo-notifications` does not expose (a small Expo module
 `NotificationCompat.Builder.setFullScreenIntent`). The manifest is prepared for it; see the final
 report for the upgrade path.
 
-## 8. Building with EAS
+## 8. Hosting on Amplify (web + backend CI/CD)
+
+The repo contains `amplify.yml`, so a connected GitHub branch builds in two phases:
+
+1. **Backend** – `npm ci` + `npx ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID`
+   deploys `amplify/` into the hosting account and writes `amplify_outputs.json` (which is
+   git-ignored on purpose – never commit a sandbox's outputs).
+2. **Frontend** – `npm run build` (= `expo export --platform web`) and publishes `dist/`.
+
+Setup checklist in the Amplify console (App → Hosting):
+
+- **Service role**: the app needs a role with `AmplifyBackendDeployFullAccess` (General settings →
+  Service role). Gen 2 backend deploys fail immediately without it.
+- **Environment variables** (Hosting → Environment variables): `EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY`,
+  `EXPO_PUBLIC_GOOGLE_MAPS_MAP_ID`, `EXPO_PUBLIC_EAS_PROJECT_ID`, optionally `SES_FROM_EMAIL`,
+  `SES_FROM_NAME`, `SCHOOL_NAME`.
+- **Secrets** (Hosting → Secrets): `GOOGLE_ROUTES_API_KEY` for the `main` branch.
+- **Rewrites and redirects**: the web build is a single-page app. Add one rule:
+  source `</^[^.]+$|\.(?!(css|gif|ico|jpg|jpeg|js|png|txt|svg|woff|woff2|ttf|map|json|wav|webp)$)([^.]+$)/>`
+  → target `/index.html`, type `200 (Rewrite)`.
+- After the first successful deploy, seed that backend the same way as the sandbox: download its
+  outputs with `npx ampx generate outputs --branch main --app-id <appId> --out-dir .` (credentials
+  for the hosting account) and run `npm run create-admin` / `npm run seed`.
+
+If a build fails, open the deployment → **Build** log and scroll past the npm warnings: the real
+error is the last `npm error` / `[ERROR]` line. The most common ones:
+
+| Log line | Fix |
+|---|---|
+| `npm ci can only install packages when your package.json and package-lock.json are in sync` | run `npm install` locally, commit `package-lock.json` |
+| `Missing script: "build"` | the default build spec is being used – make sure `amplify.yml` is committed |
+| `AccessDenied` / `not authorized to perform` during `pipeline-deploy` | attach the service role (see above) |
+| `Updates are not allowed for property - UsernameAttributes` | an older pool exists for that branch – delete the branch backend (Hosting → Backend) and redeploy |
+
+## 9. Building with EAS
 
 ```bash
 npx eas-cli build:configure
@@ -188,7 +222,7 @@ npx eas-cli update --branch production --message "…"          # OTA JS updates
 requires Google Play review (foreground-service location) – describe the driver use-case in the
 Play Console.
 
-## 9. Workspaces – what's where
+## 10. Workspaces – what's where
 
 | Workspace | Routes | Highlights |
 |---|---|---|
@@ -200,7 +234,7 @@ Play Console.
 Shared: `chat/[conversationId]` (one `ChatScreen` + `Composer` for every role), `alarm/[tripStopId]`,
 `notifications`, `privacy`, `change-password`.
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 - **"Not Authorized" on sign-in / queries** – the user is not in a Cognito group. Add them to
   `ADMIN|TEACHER|DRIVER|STUDENT` (the admin mutations do this automatically).
