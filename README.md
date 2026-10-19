@@ -245,7 +245,19 @@ error is the last `npm error` / `[ERROR]` line. The most common ones:
 | `AccessDenied` / `not authorized to perform` during `pipeline-deploy` | attach the service role (see above) |
 | `Updates are not allowed for property - UsernameAttributes` | an older pool exists for that branch – delete the branch backend (Hosting → Backend) and redeploy |
 
-## 9. Building with EAS
+## 9. Testing on phones (Expo account `masta-jazz`, EAS project `e081390e-15bc-4648-8903-133ad6b3eb9b`)
+
+| What | How |
+|---|---|
+| **Android APK** (real native build, Google Maps, no Expo Go needed) | EAS Build, profile `preview` (`eas.json`). Builds and their download links: https://expo.dev/accounts/masta-jazz/projects/school-app/builds. Rebuild with `npx eas-cli build -p android --profile preview`. Signing uses the local keystore in `credentials/android/release.jks` + `credentials.json` (git-ignored; back them up, you need them for every future build). |
+| **iPhone without an Apple developer account** | Install **Expo Go** from the App Store, then open the latest update of the `preview` branch: https://expo.dev/accounts/masta-jazz/projects/school-app/updates (open the update → scan the QR / tap "Open in Expo Go"). Publish a new one with `npx eas-cli update --branch preview --message "…"`. Expo Go limits: Apple Maps instead of Google Maps, no background location (the driver's foreground tracking still publishes), no custom alarm channel on Android, in-memory storage. |
+| **iPhone / tablet with a dev server** | `npx expo start --tunnel` prints an `exp://…exp.direct` link that Expo Go on any network can open while the server runs. |
+| **Full-featured iOS build** | Needs an Apple developer account: `npx eas-cli build -p ios --profile preview` and install via TestFlight/internal distribution. |
+
+Push notifications on the Android APK need FCM credentials (README §7, step 2); until then the token
+request fails quietly and the alarm only rings when the app is open.
+
+## 10. Building with EAS
 
 ```bash
 npx eas-cli build:configure
