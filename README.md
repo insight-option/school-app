@@ -183,20 +183,46 @@ The repo contains `amplify.yml`, so a connected GitHub branch builds in two phas
    git-ignored on purpose – never commit a sandbox's outputs).
 2. **Frontend** – `npm run build` (= `expo export --platform web`) and publishes `dist/`.
 
-Setup checklist in the Amplify console (App → Hosting):
+Setup checklist in the Amplify console (App → Hosting), with the equivalent CLI commands
+(`--profile` = a profile for the hosting account, region `ap-south-1`, app id `dg9g67lujh0do`):
 
 - **Service role**: the app needs a role with `AmplifyBackendDeployFullAccess` (General settings →
   Service role). Gen 2 backend deploys fail immediately without it.
-- **Environment variables** (Hosting → Environment variables): `EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY`,
-  `EXPO_PUBLIC_GOOGLE_MAPS_MAP_ID`, `EXPO_PUBLIC_EAS_PROJECT_ID`, optionally `SES_FROM_EMAIL`,
-  `SES_FROM_NAME`, `SCHOOL_NAME`.
-- **Secrets** (Hosting → Secrets): `GOOGLE_ROUTES_API_KEY` for the `main` branch.
-- **Rewrites and redirects**: the web build is a single-page app. Add one rule:
-  source `</^[^.]+$|\.(?!(css|gif|ico|jpg|jpeg|js|png|txt|svg|woff|woff2|ttf|map|json|wav|webp)$)([^.]+$)/>`
-  → target `/index.html`, type `200 (Rewrite)`.
-- After the first successful deploy, seed that backend the same way as the sandbox: download its
-  outputs with `npx ampx generate outputs --branch main --app-id <appId> --out-dir .` (credentials
-  for the hosting account) and run `npm run create-admin` / `npm run seed`.
+  `aws iam list-attached-role-policies --role-name <service role>` must list the policy.
+- **Environment variables** (Hosting → Environment variables). Already set on the app:
+  `EXPO_PUBLIC_GOOGLE_MAPS_MAP_ID=DEMO_MAP_ID`, `EXPO_PUBLIC_SCHOOL_ID=default`, `SCHOOL_NAME`,
+  `SES_FROM_NAME`. Still to add with your own values (they cannot be generated for you):
+  - `EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY` – Google Cloud Console → Credentials → API key restricted to
+    the HTTP referrer `https://main.dg9g67lujh0do.amplifyapp.com/*` with *Maps JavaScript API* enabled.
+  - `EXPO_PUBLIC_EAS_PROJECT_ID` – `npx eas-cli init` prints it (needed for push tokens).
+  - `SES_FROM_EMAIL` – only after the SES identity is verified (see §5).
+
+  ```bash
+  aws amplify update-app --app-id dg9g67lujh0do --environment-variables \
+    "EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY=<key>,EXPO_PUBLIC_GOOGLE_MAPS_MAP_ID=DEMO_MAP_ID,EXPO_PUBLIC_SCHOOL_ID=default,SCHOOL_NAME=Al Noor International School,SES_FROM_NAME=School Office"
+  aws amplify start-job --app-id dg9g67lujh0do --branch-name main --job-type RELEASE   # rebuild to bake them in
+  ```
+
+  `update-app` replaces the whole variable map, so always pass every variable.
+- **Secrets** (Hosting → Secrets): `GOOGLE_ROUTES_API_KEY` for the `main` branch. Branch secrets are
+  SSM SecureString parameters under `/amplify/<appId>/<branch>/`:
+
+  ```bash
+  aws ssm put-parameter --name /amplify/dg9g67lujh0do/main/GOOGLE_ROUTES_API_KEY --type SecureString --value "<key>"
+  ```
+
+  Enable *Routes API* and *Places API (New)* on that key and keep it unrestricted by referrer
+  (it is used from Lambda). The Lambda reads it at cold start, so no redeploy is needed.
+- **Rewrites and redirects**: the web build is a single-page app. Two rules are configured:
+  the regex rewrite `</^[^.]+$|\.(?!(css|gif|ico|jpg|jpeg|js|png|txt|svg|woff|woff2|ttf|map|json|wav|webp)$)([^.]+$)/>`
+  → `/index.html` (200) and the fallback `/<*>` → `/index.html` (404-200).
+- **Seeding the branch backend**: download its outputs and point the scripts at them:
+
+  ```bash
+  npx ampx generate outputs --branch main --app-id dg9g67lujh0do --out-dir ./hosting
+  AMPLIFY_OUTPUTS=./hosting/amplify_outputs.json npm run seed
+  AMPLIFY_OUTPUTS=./hosting/amplify_outputs.json npm run smoke
+  ```
 
 If a build fails, open the deployment → **Build** log and scroll past the npm warnings: the real
 error is the last `npm error` / `[ERROR]` line. The most common ones:

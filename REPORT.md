@@ -110,3 +110,16 @@ two `@opentelemetry/core@2.0.0` entries were missing), so `npm ci` refused to in
 - added `npm run build` and `engines.node` to `package.json`, `.nvmrc`;
 - README §8 lists the console settings still needed: service role, environment variables, the
   `GOOGLE_ROUTES_API_KEY` secret, and the SPA rewrite rule.
+
+Deployment 3 (commit `4010d4d`) succeeded. Hosting configuration done through the AWS API on
+2026-10-19 (account 946385207602, app `dg9g67lujh0do`, branch `main`):
+
+| Item | State |
+|---|---|
+| Service role | `AmplifySSRLoggingRole-68f8232c…` already carries `AmplifyBackendDeployFullAccess` (verified) |
+| Environment variables | `EXPO_PUBLIC_GOOGLE_MAPS_MAP_ID=DEMO_MAP_ID`, `EXPO_PUBLIC_SCHOOL_ID=default`, `SCHOOL_NAME=Al Noor International School`, `SES_FROM_NAME=School Office` set on the app |
+| Rewrites | regex SPA rewrite (200) + `/<*>` fallback (404-200); `/chat/<id>`, `/(admin)/dashboard`, `/notifications` now return the app shell |
+| SES | identity `mastaisshakh@gmail.com` created in ap-south-1, verification e-mail sent (status PENDING); account is in SES sandbox (200/day, verified recipients only) |
+| Secrets | none – `GOOGLE_ROUTES_API_KEY` needs a Google Cloud key (routing falls back to straight lines until then) |
+| Not settable here | `EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY` (Google Cloud), `EXPO_PUBLIC_EAS_PROJECT_ID` (Expo account) |
+| Branch backend | user pool `ap-south-1_NBbyBcsLa`, seeded with the same demo data as the sandbox (`AMPLIFY_OUTPUTS=… npm run seed`) |

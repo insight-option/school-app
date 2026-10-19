@@ -24,12 +24,17 @@ export type Outputs = {
   custom?: { schoolId?: string; schoolName?: string };
 } & Record<string, unknown>;
 
+/**
+ * Loads amplify_outputs.json from the project root, or from AMPLIFY_OUTPUTS when set – e.g. the
+ * outputs of a hosting branch downloaded with `npx ampx generate outputs --branch main --app-id …`.
+ */
 export function loadOutputs(): Outputs {
-  const path = resolve(process.cwd(), 'amplify_outputs.json');
+  const path = resolve(process.cwd(), process.env.AMPLIFY_OUTPUTS ?? 'amplify_outputs.json');
   if (!existsSync(path)) {
-    console.error('amplify_outputs.json not found. Run `npx ampx sandbox` first.');
+    console.error(`${path} not found. Run \`npx ampx sandbox\` or set AMPLIFY_OUTPUTS.`);
     process.exit(1);
   }
+  console.log(`▸ Using ${path}`);
   const outputs = JSON.parse(readFileSync(path, 'utf8')) as Outputs;
   Amplify.configure(outputs as never);
   return outputs;
