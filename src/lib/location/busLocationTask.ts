@@ -4,6 +4,7 @@ import * as TaskManager from 'expo-task-manager';
 import '../amplify';
 import { publishBusLocation } from '../../features/trips';
 import { KV_KEYS, kv } from '../storage/mmkv';
+import { SUPPORTS_BACKGROUND_LOCATION } from '../runtime';
 import { PUBLISH_INTERVAL_MS, shouldPublish, type GpsSample, type LastPublish } from '../rules/location';
 
 export { PUBLISH_DISTANCE_M, PUBLISH_INTERVAL_MS, MAX_ACCURACY_M, gpsQuality, shouldPublish, type GpsSample } from '../rules/location';
@@ -64,7 +65,8 @@ export async function ensureLocationPermissions(background: boolean): Promise<'g
 export async function startBusLocationUpdates(trip: ActiveTrip, labels: { title: string; body: string }): Promise<void> {
   kv.setJSON(KV_KEYS.activeTrip, trip);
   kv.delete(KV_KEYS.lastBusPublish);
-  if (Platform.OS === 'web') return; // web uses the foreground watcher (see useForegroundLocation)
+  // Web and Expo Go cannot run the background task – the foreground watcher (useDriverLocation) publishes instead.
+  if (!SUPPORTS_BACKGROUND_LOCATION) return;
   const already = await Location.hasStartedLocationUpdatesAsync(BUS_LOCATION_TASK).catch(() => false);
   if (already) return;
   await Location.startLocationUpdatesAsync(BUS_LOCATION_TASK, {
@@ -87,7 +89,7 @@ export async function startBusLocationUpdates(trip: ActiveTrip, labels: { title:
 export async function stopBusLocationUpdates(): Promise<void> {
   kv.delete(KV_KEYS.activeTrip);
   kv.delete(KV_KEYS.lastBusPublish);
-  if (Platform.OS === 'web') return;
+  if (!SUPPORTS_BACKGROUND_LOCATION) return;
   const started = await Location.hasStartedLocationUpdatesAsync(BUS_LOCATION_TASK).catch(() => false);
   if (started) await Location.stopLocationUpdatesAsync(BUS_LOCATION_TASK);
 }

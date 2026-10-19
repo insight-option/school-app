@@ -1,9 +1,13 @@
 import React, { forwardRef, useCallback, useImperativeHandle, useMemo, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import RNMapView, { Marker, Polyline, PROVIDER_GOOGLE, type MapPressEvent, type Region as RNRegion } from 'react-native-maps';
 import type { MapHandle, MapMarker, MapProps } from './types';
 import { BusMarkerView, HomeMarkerView, PinMarkerView, SchoolMarkerView, StudentMarkerView } from './markers';
 import { regionFor } from '../../lib/geo';
+import { IS_EXPO_GO } from '../../lib/runtime';
+
+// Expo Go on iOS has no Google Maps SDK – fall back to Apple Maps there; everywhere else use Google.
+const PROVIDER = IS_EXPO_GO && Platform.OS === 'ios' ? undefined : PROVIDER_GOOGLE;
 
 /** Native map (Google provider on Android & iOS). Same props as MapView.web.tsx. */
 export const MapView = forwardRef<MapHandle, MapProps>(function MapView(
@@ -47,7 +51,7 @@ export const MapView = forwardRef<MapHandle, MapProps>(function MapView(
     <View style={[styles.fill, style]} testID={testID}>
       <RNMapView
         ref={mapRef}
-        provider={PROVIDER_GOOGLE}
+        provider={PROVIDER}
         style={styles.fill}
         initialRegion={region}
         showsUserLocation={showsUserLocation}

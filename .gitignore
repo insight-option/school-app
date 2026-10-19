@@ -47,3 +47,7 @@ amplifyconfiguration*
 # tests / seed output
 coverage/
 seed-output.json
+
+# EAS local credentials (never commit)
+credentials.json
+credentials/

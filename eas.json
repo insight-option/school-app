@@ -1,0 +1,41 @@
+{
+  "cli": {
+    "version": ">= 18.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "base": {
+      "env": {
+        "EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY": "AIzaSyDaQ_SByiRuRN3xUBJzFpSUKKsdZHdAxqI",
+        "EXPO_PUBLIC_GOOGLE_MAPS_IOS_KEY": "AIzaSyDaQ_SByiRuRN3xUBJzFpSUKKsdZHdAxqI",
+        "EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY": "AIzaSyDaQ_SByiRuRN3xUBJzFpSUKKsdZHdAxqI",
+        "EXPO_PUBLIC_GOOGLE_MAPS_MAP_ID": "DEMO_MAP_ID",
+        "EXPO_PUBLIC_EAS_PROJECT_ID": "e081390e-15bc-4648-8903-133ad6b3eb9b",
+        "EXPO_PUBLIC_SCHOOL_ID": "default"
+      }
+    },
+    "development": {
+      "extends": "base",
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development",
+      "android": { "credentialsSource": "local" }
+    },
+    "preview": {
+      "extends": "base",
+      "distribution": "internal",
+      "channel": "preview",
+      "android": { "buildType": "apk", "credentialsSource": "local" },
+      "ios": { "simulator": false }
+    },
+    "production": {
+      "extends": "base",
+      "channel": "production",
+      "autoIncrement": true,
+      "android": { "buildType": "app-bundle", "credentialsSource": "local" }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
