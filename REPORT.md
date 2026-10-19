@@ -120,6 +120,6 @@ Deployment 3 (commit `4010d4d`) succeeded. Hosting configuration done through th
 | Environment variables | `EXPO_PUBLIC_GOOGLE_MAPS_MAP_ID=DEMO_MAP_ID`, `EXPO_PUBLIC_SCHOOL_ID=default`, `SCHOOL_NAME=Al Noor International School`, `SES_FROM_NAME=School Office` set on the app |
 | Rewrites | regex SPA rewrite (200) + `/<*>` fallback (404-200); `/chat/<id>`, `/(admin)/dashboard`, `/notifications` now return the app shell |
 | SES | identity `mastaisshakh@gmail.com` created in ap-south-1, verification e-mail sent (status PENDING); account is in SES sandbox (200/day, verified recipients only) |
-| Secrets | none – `GOOGLE_ROUTES_API_KEY` needs a Google Cloud key (routing falls back to straight lines until then) |
-| Not settable here | `EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY` (Google Cloud), `EXPO_PUBLIC_EAS_PROJECT_ID` (Expo account) |
+| Google Maps key | The user's Maps Platform key (created 2026-10-19, restricted to 32 Maps APIs) is set as `EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY` on the app and as the `GOOGLE_ROUTES_API_KEY` secret (shared + branch SSM paths). Validated against Routes, Places (New), Static Maps and the Maps JavaScript loader. Also written to the git-ignored local `.env` for Android/iOS/web dev builds. |
+| Not settable here | `EXPO_PUBLIC_EAS_PROJECT_ID` (needs an Expo account login) |
 | Branch backend | user pool `ap-south-1_NBbyBcsLa`, seeded with the same demo data as the sandbox (`AMPLIFY_OUTPUTS=… npm run seed`) |

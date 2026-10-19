@@ -122,7 +122,15 @@ In sandbox Cognito uses its default sender (max **50 e-mails/day**). For product
 ## 6. Google Maps & Routes
 
 - **Rendering keys** (`EXPO_PUBLIC_GOOGLE_MAPS_*`) are baked into the native apps/web bundle –
-  restrict them in Google Cloud Console.
+  restrict them in Google Cloud Console. Today one key ("Maps Platform API Key", 32 Maps APIs) is
+  used for the web bundle, the native builds (`.env`) and the Routes/Places secret. Before going
+  live split it: create a **browser key** restricted to the HTTP referrers
+  `https://main.dg9g67lujh0do.amplifyapp.com/*` (plus your custom domain) and to *Maps JavaScript
+  API*; put it in `EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY`. Create **Android/iOS keys** restricted by
+  package + SHA-1 / bundle id for `EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY` / `_IOS_KEY`. Keep the
+  current key as the **server key**: no application restriction (Lambda calls it), API
+  restriction *Routes API* + *Places API (New)* only. A referrer-restricted key cannot be used
+  from Lambda, and an unrestricted key inside a public web bundle can be abused for billable calls.
 - **Routes API / Places API (New)** are called only by the `trips` Lambda with the secret
   `GOOGLE_ROUTES_API_KEY`. `computeRoutes` is requested with `optimizeWaypointOrder: true`,
   `travelMode: DRIVE`, `departureTime: now`, ≤ 25 intermediates per call. Google rejects waypoint
@@ -204,15 +212,18 @@ Setup checklist in the Amplify console (App → Hosting), with the equivalent CL
   ```
 
   `update-app` replaces the whole variable map, so always pass every variable.
-- **Secrets** (Hosting → Secrets): `GOOGLE_ROUTES_API_KEY` for the `main` branch. Branch secrets are
-  SSM SecureString parameters under `/amplify/<appId>/<branch>/`:
+- **Secrets** (Hosting → Secrets): `GOOGLE_ROUTES_API_KEY`. Backend secrets are SSM SecureString
+  parameters; every branch's Lambdas look first at the branch path
+  `/amplify/<appId>/<branch-stack>/<name>` and then at the shared path, which is the simplest
+  one to set by hand (the exact paths are in the Lambda's `AMPLIFY_SSM_ENV_CONFIG` variable):
 
   ```bash
-  aws ssm put-parameter --name /amplify/dg9g67lujh0do/main/GOOGLE_ROUTES_API_KEY --type SecureString --value "<key>"
+  aws ssm put-parameter --name /amplify/shared/dg9g67lujh0do/GOOGLE_ROUTES_API_KEY --type SecureString --overwrite --value "<key>"
   ```
 
   Enable *Routes API* and *Places API (New)* on that key and keep it unrestricted by referrer
-  (it is used from Lambda). The Lambda reads it at cold start, so no redeploy is needed.
+  (it is used from Lambda). The Lambda reads it at cold start; to pick a new value up immediately,
+  touch the function (`aws lambda update-function-configuration --function-name <trips fn> --description x`).
 - **Rewrites and redirects**: the web build is a single-page app. Two rules are configured:
   the regex rewrite `</^[^.]+$|\.(?!(css|gif|ico|jpg|jpeg|js|png|txt|svg|woff|woff2|ttf|map|json|wav|webp)$)([^.]+$)/>`
   → `/index.html` (200) and the fallback `/<*>` → `/index.html` (404-200).
