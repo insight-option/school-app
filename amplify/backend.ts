@@ -40,6 +40,8 @@ cfnUserPool.addPropertyOverride('Policies.PasswordPolicy', {
 });
 // Only the office creates accounts – no self sign-up.
 cfnUserPool.addPropertyOverride('AdminCreateUserConfig.AllowAdminCreateUserOnly', true);
+// SRP for real builds; USER_PASSWORD_AUTH lets Expo Go (no Amplify native module) sign in during previews.
+cfnUserPoolClient.explicitAuthFlows = ['ALLOW_USER_SRP_AUTH', 'ALLOW_USER_PASSWORD_AUTH', 'ALLOW_CUSTOM_AUTH', 'ALLOW_REFRESH_TOKEN_AUTH'];
 // Keep tokens short-lived but refresh for a long time so parents stay signed in.
 cfnUserPoolClient.refreshTokenValidity = 3650;
 cfnUserPoolClient.tokenValidityUnits = { refreshToken: 'days', accessToken: 'minutes', idToken: 'minutes' };

@@ -11,6 +11,7 @@ import {
 } from 'aws-amplify/auth';
 import { create } from 'zustand';
 import { SCHOOL_ID } from '../amplify';
+import { IS_EXPO_GO } from '../runtime';
 import type { Role } from '../data/client';
 import { roleFromGroups } from './routing';
 
@@ -91,7 +92,8 @@ export function startAuthListener() {
 export type SignInResult = { step: 'DONE' } | { step: 'NEW_PASSWORD' } | { step: 'OTHER'; name: string };
 
 export async function signInWithId(username: string, password: string): Promise<SignInResult> {
-  const res = await signIn({ username: username.trim(), password });
+  // Expo Go lacks Amplify's native SRP module, so previews use the plain password flow (TLS-protected).
+  const res = await signIn({ username: username.trim(), password, options: { authFlowType: IS_EXPO_GO ? 'USER_PASSWORD_AUTH' : 'USER_SRP_AUTH' } });
   if (res.isSignedIn) {
     await bootstrapSession();
     return { step: 'DONE' };
