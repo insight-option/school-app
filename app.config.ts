@@ -1,9 +1,13 @@
+import { existsSync } from 'node:fs';
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
 const androidMapsKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY ?? '';
 const iosMapsKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_IOS_KEY ?? '';
 // EAS project (account masta-jazz). The env var wins so forks can point at their own project.
 const easProjectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID || 'e081390e-15bc-4648-8903-133ad6b3eb9b';
+// Android push (FCM) needs the Firebase config file in the build. Point GOOGLE_SERVICES_JSON at it
+// (EAS "file" env var) or drop google-services.json into the project root; see README §7.
+const googleServicesFile = process.env.GOOGLE_SERVICES_JSON ?? (existsSync('./google-services.json') ? './google-services.json' : undefined);
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
@@ -39,6 +43,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     package: 'com.oneqapp.schoolapp',
     versionCode: 1,
+    googleServicesFile,
     adaptiveIcon: {
       backgroundColor: '#E6F4FE',
       foregroundImage: './assets/android-icon-foreground.png',

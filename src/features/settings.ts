@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client, unwrap, type SchoolSettings } from '../lib/data/client';
 import { qk } from '../lib/query/client';
@@ -26,12 +27,32 @@ export function useSettings() {
   return useQuery({
     queryKey: qk.settings(schoolId),
     enabled: session.status === 'signedIn',
-    staleTime: 5 * 60_000,
+    staleTime: 60_000,
     queryFn: async () => {
       const res = await client.models.SchoolSettings.get({ schoolId });
       return unwrap(res, 'settings') ?? ({ ...DEFAULT_SETTINGS, schoolId } as SchoolSettings);
     },
   });
+}
+
+/**
+ * Keeps every workspace in sync with the office: when the school location, name, colours or alarm
+ * settings change, drivers and parents see it immediately instead of after the cache expires.
+ * Mounted once in the root layout.
+ */
+export function useSettingsSubscription() {
+  const qc = useQueryClient();
+  const session = useSession();
+  const schoolId = session.schoolId;
+  const enabled = session.status === 'signedIn';
+  useEffect(() => {
+    if (!enabled) return;
+    const sub = client.models.SchoolSettings.onUpdate({ filter: { schoolId: { eq: schoolId } } }).subscribe({
+      next: (s) => qc.setQueryData(qk.settings(schoolId), s),
+      error: (e) => console.warn('settings subscription', e),
+    });
+    return () => sub.unsubscribe();
+  }, [enabled, schoolId, qc]);
 }
 
 export function useSaveSettings() {

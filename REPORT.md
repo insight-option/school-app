@@ -140,3 +140,18 @@ courses and removes the class group chat. Group messages a deleted person sent a
 backend to clear the demo data; the hosted `admin-users` Lambda was hot-patched with the new bundle
 (same esbuild settings Amplify uses) and verified on real rows before the wipe, and the next
 `git push` redeploys the identical code through the pipeline.
+
+## Location, storage and alarm findings (2026-10-20, from device testing)
+
+| Symptom | Root cause | Fix |
+|---|---|---|
+| Red banner `User: arn:aws:sts::…:assumed-role/amplify-…` and voice/photo messages stuck on "Failed" for drivers, students, teachers | Every user is in a Cognito group and the identity pool maps group members to their **group IAM role**, not the generic authenticated role. Only the ADMIN group role carried S3 permissions, so `allow.authenticated` / `allow.entity` storage rules never applied to real users. | `amplify/storage/resource.ts` grants every path to the groups explicitly (members read/write chat, read branding/broadcasts/courses/feedback, own avatars; admins everything incl. CSV imports). |
+| `ERR_LOCATION_INFO_PLIST` console error when the driver pressed Start trip in Expo Go (iOS) | `requestBackgroundPermissionsAsync` was called even where background location is unavailable (Expo Go, web); the promise chain had no catch. | `ensureLocationPermissions` only asks for background permission in real builds and tolerates failures; the trip screen catches setup errors. |
+| Route drawn "between the student and the school" instead of from the driver | Before a trip starts the device publishes nothing, so the route origin fell back to the bus's last stored position = the school. | `startTrip` / `computeTripRoute` accept the driver's live `lat`/`lng`; the trip screen sends its GPS fix (fetching one if needed) and writes it to `BusLocation`; the foreground watcher now publishes the bus position even before a trip. Morning: driver → all pending students (optimised, live traffic) → school. Afternoon: driver → students (optimised) → farthest stop. |
+| "School location not saved" | It was saved (DynamoDB held the new coordinates) but the preview map kept its first region, and other devices cached the old settings for five minutes. | Preview re-centres on the new coordinates and shows them with an "unsaved" hint until Save; all workspaces subscribe to `SchoolSettings` updates (`useSettingsSubscription`). |
+| Alarm never rang on the student's phone | The only registered push device belonged to the driver's iPhone. The student's Android phone cannot obtain a push token: the build has no Firebase (FCM) configuration, which only the project owner can create. Signing out also deleted the device row. | `app.config.ts` picks up `google-services.json` / `GOOGLE_SERVICES_JSON`; README §7 gives the exact Firebase + `eas credentials` steps; devices stay registered after sign-out so alarms keep ringing on that phone. The Step Functions repeat loop and the Lambda were verified in CloudWatch (no errors, repeats fired). |
+
+Still outside the code: Firebase project + FCM key upload + a new APK (user), Apple developer account for iOS
+builds/APNs and Critical Alerts, and Expo Go's own limits (default notification sound, Apple Maps,
+no background location). Expo Go over the ngrok tunnel is a development bundle and is several times
+slower than the published update or the APK; performance should be judged on those.

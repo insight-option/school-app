@@ -140,7 +140,7 @@ export function useTripSubscriptions(tripId: string | null | undefined, enabled 
 export function useStartTrip() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { busId: string; type: TripType }) => unwrap(await client.mutations.startTrip(input), 'start trip'),
+    mutationFn: async (input: { busId: string; type: TripType; lat?: number | null; lng?: number | null }) => unwrap(await client.mutations.startTrip(input), 'start trip'),
     onSuccess: (trip) => {
       if (!trip) return;
       qc.setQueryData(qk.trip(trip.id), trip);
@@ -166,7 +166,7 @@ export function useEndTrip() {
 export function useComputeRoute() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { tripId: string; force?: boolean }) => unwrap(await client.mutations.computeTripRoute(input), 'route'),
+    mutationFn: async (input: { tripId: string; force?: boolean; lat?: number | null; lng?: number | null }) => unwrap(await client.mutations.computeTripRoute(input), 'route'),
     onSuccess: (trip) => {
       if (!trip) return;
       qc.setQueryData(qk.trip(trip.id), trip);

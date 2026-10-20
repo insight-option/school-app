@@ -148,13 +148,27 @@ In sandbox Cognito uses its default sender (max **50 e-mails/day**). For product
 ## 7. Push notifications & the alarm
 
 1. `npx eas-cli init` → put the project id in `EXPO_PUBLIC_EAS_PROJECT_ID`.
-2. **Android (FCM v1):** create a Firebase project, download the service account JSON and upload
-   it: `npx eas-cli credentials` → Android → Push Notifications. Add `google-services.json` to the
-   project root and `android.googleServicesFile` in `app.config.ts` if you need it for other
-   Firebase features (not required for Expo push).
-3. **iOS (APNs):** `npx eas-cli credentials` → iOS → Push Notifications → let EAS create the key.
-4. Build a development build and allow notifications on the device; the token is stored in the
-   `Device` table (several devices per account – parent and student phones share the login).
+2. **Android (FCM v1) – required, or Android phones never receive a push and the alarm cannot ring
+   while the app is closed.** Without it `getExpoPushTokenAsync` fails on Android ("Default
+   FirebaseApp is not initialized") and no `Device` row is created. Steps (about 10 minutes):
+   1. https://console.firebase.google.com → **Add project** (any name, Analytics off).
+   2. Project overview → **Add app** → Android → package name `com.oneqapp.schoolapp` → Register →
+      **Download google-services.json**. Put the file in the project root (it is git-ignored) **or**
+      upload it to EAS as a file variable: `npx eas-cli env:create --scope project --name
+      GOOGLE_SERVICES_JSON --type file --value ./google-services.json --visibility secret
+      --environment preview --environment production`. `app.config.ts` picks either up.
+   3. Project settings (gear) → **Service accounts** → **Generate new private key** → save the JSON.
+   4. `npx eas-cli credentials` → Android → `preview` → **Google Service Account** → **Set up a Google
+      Service Account Key for Push Notifications (FCM V1)** → upload that JSON. Repeat for `production`.
+   5. Rebuild the APK (`npx eas-cli build -p android --profile preview`) – the Firebase file is
+      compiled into the app, so the old APK cannot receive pushes.
+3. **iOS (APNs):** needs an Apple Developer account: `npx eas-cli credentials` → iOS → Push
+   Notifications → let EAS create the key. In **Expo Go** on iOS pushes already work (Expo's own
+   certificate), but with the default iOS sound instead of `alarm.wav`.
+4. Allow notifications on the device (parents get asked during onboarding); the token is stored in the
+   `Device` table (several devices per account – parent and student phones share the login). Devices
+   stay registered when the user signs out, so the alarm keeps ringing on that phone until
+   notifications are disabled in the system settings or another account signs in on it.
 
 The alarm (driver → student) has all layers:
 

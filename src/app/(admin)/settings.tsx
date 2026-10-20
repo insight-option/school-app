@@ -87,8 +87,15 @@ export default function AdminSettings() {
         <SectionHeader title={t('admin.schoolLocation')} action={t('common.edit')} onAction={() => setPick(true)} />
         <Card padding={0} style={{ overflow: 'hidden' }}>
           {location ? (
-            <View style={{ height: 200 }} pointerEvents="none">
-              <MapView markers={[{ id: 'school', kind: 'school', lat: location.lat, lng: location.lng }]} initialRegion={{ ...location, latitudeDelta: 0.02, longitudeDelta: 0.02 }} />
+            <View>
+              {/* keyed on the coordinates so the preview re-centres after picking a new spot */}
+              <View style={{ height: 200 }} pointerEvents="none">
+                <MapView key={`${location.lat.toFixed(5)},${location.lng.toFixed(5)}`} markers={[{ id: 'school', kind: 'school', lat: location.lat, lng: location.lng }]} initialRegion={{ ...location, latitudeDelta: 0.02, longitudeDelta: 0.02 }} />
+              </View>
+              <Text variant="caption" color={locationEdit !== undefined ? 'warning' : 'textMuted'} style={{ padding: theme.spacing.sm }}>
+                {location.lat.toFixed(5)}, {location.lng.toFixed(5)}
+                {locationEdit !== undefined ? ` · ${t('common.unsavedChanges')}` : ''}
+              </Text>
             </View>
           ) : (
             <Text color="textMuted" style={{ padding: theme.spacing.lg }}>

@@ -15,7 +15,7 @@ import { useSettings } from '../../../features/settings';
 import { routeMetaOf, useActiveTrip, useComputeRoute, useEndTrip, useNotifyBusNear, useReorderStops, useStartTrip, useTripStops, useTripSubscriptions } from '../../../features/trips';
 import { useBusDayStatusSubscription, useBusDayStatuses } from '../../../features/dayStatus';
 import { useDriverLocation } from '../../../lib/location/useDriverLocation';
-import { ensureLocationPermissions, startBusLocationUpdates, stopBusLocationUpdates } from '../../../lib/location/busLocationTask';
+import { ensureLocationPermissions, getCurrentFix, setDriverBusId, startBusLocationUpdates, stopBusLocationUpdates } from '../../../lib/location/busLocationTask';
 import { decodePolyline, distanceToPolylineMeters, haversineMeters } from '../../../lib/geo';
 import { initials } from '../../../ui/theme';
 import { todayIn } from '../../../lib/util/format';
@@ -69,6 +69,16 @@ export default function DriverTripScreen() {
 
   const { sample, quality, permission } = useDriverLocation(true);
   const busPos = sample ? { lat: sample.lat, lng: sample.lng, heading: sample.heading } : null;
+  const [locating, setLocating] = useState(false);
+  // Latest fix for callbacks that run outside the render cycle (traffic refresh interval).
+  const busPosRef = useRef(busPos);
+  useEffect(() => {
+    busPosRef.current = busPos;
+  });
+  // Let the foreground watcher publish the bus position even before a trip starts.
+  useEffect(() => {
+    setDriverBusId(busId);
+  }, [busId]);
 
   // ── Follow mode ──
   useEffect(() => {
@@ -82,7 +92,7 @@ export default function DriverTripScreen() {
       void ensureLocationPermissions(true).then((res) => {
         if (res === 'denied') toast.error(t('driver.locationPermissionBody'));
         return startBusLocationUpdates({ busId, tripId: trip.id }, { title: t('driver.foregroundServiceTitle'), body: t('driver.foregroundServiceBody') }).catch((e) => toast.error(String(e)));
-      });
+      }).catch((e) => console.warn('location setup failed', e));
     } else {
       void stopBusLocationUpdates();
     }
@@ -91,7 +101,7 @@ export default function DriverTripScreen() {
   // ── Periodic traffic refresh (5 min) ──
   useEffect(() => {
     if (!trip) return;
-    const id = setInterval(() => compute.mutate({ tripId: trip.id }), TRAFFIC_REFRESH_MS);
+    const id = setInterval(() => compute.mutate({ tripId: trip.id, lat: busPosRef.current?.lat, lng: busPosRef.current?.lng }), TRAFFIC_REFRESH_MS);
     return () => clearInterval(id);
   }, [trip?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -108,7 +118,7 @@ export default function DriverTripScreen() {
       offRouteSince.current ??= Date.now();
       if (Date.now() - offRouteSince.current > OFF_ROUTE_MS) {
         offRouteSince.current = Date.now();
-        compute.mutate({ tripId: trip.id });
+        compute.mutate({ tripId: trip.id, lat: busPos.lat, lng: busPos.lng });
         toast.info(t('driver.offRoute'));
       }
     } else offRouteSince.current = null;
@@ -178,10 +188,14 @@ export default function DriverTripScreen() {
     return { going: total - ng, notGoing: ng, boarded: 0 };
   }, [orderedStops, students.data, notGoingToday]);
 
-  const onStart = () => {
-    if (!busId) return;
+  const onStart = async () => {
+    if (!busId || locating) return;
     haptic('medium');
-    startTrip.mutate({ busId, type: tripType }, { onError: (e) => toast.error(e.message) });
+    // The route must start where the driver is right now: use the live fix, or fetch one.
+    setLocating(true);
+    const here = busPos ?? (await getCurrentFix());
+    setLocating(false);
+    startTrip.mutate({ busId, type: tripType, lat: here?.lat, lng: here?.lng }, { onError: (e) => toast.error(e.message) });
   };
   const onEnd = () => {
     if (!trip) return;
@@ -255,13 +269,13 @@ export default function DriverTripScreen() {
             <>
               <Chip label={t('driver.morning')} icon="sunny" selected={tripType === 'MORNING_PICKUP'} onPress={() => setTripType('MORNING_PICKUP')} />
               <Chip label={t('driver.afternoon')} icon="moon" selected={tripType === 'AFTERNOON_DROPOFF'} onPress={() => setTripType('AFTERNOON_DROPOFF')} />
-              <Button title={startTrip.isPending ? t('driver.starting') : t('driver.startTrip')} icon="play" variant="success" onPress={onStart} loading={startTrip.isPending} disabled={!busId || !students.data?.length} />
+              <Button title={startTrip.isPending || locating ? t('driver.starting') : t('driver.startTrip')} icon="play" variant="success" onPress={() => void onStart()} loading={startTrip.isPending || locating} disabled={!busId || !students.data?.length} />
             </>
           ) : (
             <>
               <Badge label={t(`trips.types.${trip.type}`)} tone="primary" />
               <Button title={t('driver.endTrip')} icon="stop" variant="danger" size="sm" onPress={() => setConfirmEnd(true)} />
-              <Button title={t('driver.recompute')} icon="refresh" variant="outline" size="sm" onPress={() => compute.mutate({ tripId: trip.id }, { onSuccess: () => toast.success(t('student.recompute')) })} loading={compute.isPending} />
+              <Button title={t('driver.recompute')} icon="refresh" variant="outline" size="sm" onPress={() => compute.mutate({ tripId: trip.id, lat: busPos?.lat, lng: busPos?.lng }, { onSuccess: () => toast.success(t('student.recompute')) })} loading={compute.isPending} />
             </>
           )}
           <Chip label={t('driver.traffic')} icon="car" selected={traffic} onPress={() => setTraffic((v) => !v)} tone="neutral" />

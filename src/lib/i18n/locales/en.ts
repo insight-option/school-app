@@ -91,6 +91,7 @@ export const en = {
     openSettings: 'Open settings',
     confirmDeleteTitle: 'Delete?',
     confirmDeleteBody: 'This cannot be undone.',
+    unsavedChanges: 'not saved yet – press Save below',
     attachments: 'Attachments',
     attach: 'Attach',
     photo: 'Photo',

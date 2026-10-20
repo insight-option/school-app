@@ -601,7 +601,8 @@ const schema = a
     // ───────────────────────────── trips (Lambda: trips) ─────────────────────────────
     startTrip: a
       .mutation()
-      .arguments({ busId: a.string().required(), type: a.ref('TripType').required() })
+      // lat/lng: the driver's current GPS fix – the route starts there, not at the bus's last known spot.
+      .arguments({ busId: a.string().required(), type: a.ref('TripType').required(), lat: a.float(), lng: a.float() })
       .returns(a.ref('Trip'))
       .authorization((allow) => [allow.authenticated()])
       .handler(a.handler.function(trips)),
@@ -615,7 +616,7 @@ const schema = a
 
     computeTripRoute: a
       .mutation()
-      .arguments({ tripId: a.string().required(), force: a.boolean() })
+      .arguments({ tripId: a.string().required(), force: a.boolean(), lat: a.float(), lng: a.float() })
       .returns(a.ref('Trip'))
       .authorization((allow) => [allow.authenticated()])
       .handler(a.handler.function(trips)),

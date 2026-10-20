@@ -14,7 +14,7 @@ import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client
 import { useTranslation } from 'react-i18next';
 import { QUERY_CACHE_BUSTER, queryClient, queryPersister } from '../lib/query/client';
 import { bootstrapSession, startAuthListener, useSession } from '../lib/auth/session';
-import { useSettings } from '../features/settings';
+import { useSettings, useSettingsSubscription } from '../features/settings';
 import { ThemeContext, buildTheme } from '../ui/theme';
 import { ToastHost } from '../ui/Toast';
 import { OfflineBanner, startNetworkListener } from '../lib/net/offline';
@@ -63,6 +63,7 @@ function ThemedApp() {
   const scheme = useResolvedScheme();
   const session = useSession();
   const settings = useSettings();
+  useSettingsSubscription();
   const theme = useMemo(() => buildTheme(scheme, settings.data?.primaryColor), [scheme, settings.data?.primaryColor]);
   const { t } = useTranslation();
 

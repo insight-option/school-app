@@ -93,6 +93,7 @@ export const ar: TranslationKeys = {
     openSettings: 'فتح الإعدادات',
     confirmDeleteTitle: 'حذف؟',
     confirmDeleteBody: 'لا يمكن التراجع عن هذا الإجراء.',
+    unsavedChanges: 'لم يُحفظ بعد – اضغط حفظ بالأسفل',
     attachments: 'المرفقات',
     attach: 'إرفاق',
     photo: 'صورة',

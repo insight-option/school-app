@@ -51,3 +51,6 @@ seed-output.json
 # EAS local credentials (never commit)
 credentials.json
 credentials/
+
+# Firebase config for Android push (upload to EAS as the GOOGLE_SERVICES_JSON file variable instead)
+google-services.json

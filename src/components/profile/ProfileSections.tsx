@@ -11,7 +11,7 @@ import { useMyProfile, useUpdateMyProfile } from '../../features/profiles';
 import { useTestAlarm } from '../../features/trips';
 import { setAppLanguage, type AppLanguage } from '../../lib/i18n';
 import { useAppearanceStore, type AppearanceMode } from '../../lib/appearance';
-import { getPushPermissionStatus, isPushSupported, openSystemNotificationSettings, registerDeviceForPush, requestPushPermission, unregisterDevice } from '../../lib/push/notifications';
+import { getPushPermissionStatus, isPushSupported, openSystemNotificationSettings, registerDeviceForPush, requestPushPermission } from '../../lib/push/notifications';
 import { uploadFile, randomId } from '../../lib/storage/s3';
 import { ImageManipulator, SaveFactor } from './imageHelpers';
 import { queryClient } from '../../lib/query/client';
@@ -181,14 +181,14 @@ export function NotificationSection({ showTestAlarm }: { showTestAlarm?: boolean
 export function AccountSection({ extra }: { extra?: React.ReactNode }) {
   const { t } = useTranslation();
   const router = useRouter();
-  const session = useSession();
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const signOut = async () => {
     setBusy(true);
     try {
-      if (session.userId) await unregisterDevice(session.userId);
+      // The device stays registered on purpose: parents asked for bus alarms to keep ringing on this
+      // phone even after signing out. Turning notifications off in the system settings stops them.
       await signOutEverywhere();
       queryClient.clear();
       router.replace('/(auth)/sign-in');

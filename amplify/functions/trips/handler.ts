@@ -53,7 +53,19 @@ async function loadStops(client: DataClient, tripId: string): Promise<TripStop[]
   return listAll((nextToken) => client.models.TripStop.listStopsByTrip({ tripId }, { limit: 200, nextToken }));
 }
 
-async function busOrigin(client: DataClient, trip: Trip): Promise<LatLng> {
+/** A usable GPS fix sent by the driver device (finite, in range, not the 0/0 placeholder). */
+function validLatLng(lat?: number | null, lng?: number | null): LatLng | null {
+  if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) return null;
+  return { lat, lng };
+}
+
+/**
+ * Where the route starts: the driver's live fix sent with the request, else the bus's last
+ * published position, else where the trip started, else the school.
+ */
+async function busOrigin(client: DataClient, trip: Trip, hint?: LatLng | null): Promise<LatLng> {
+  if (hint) return hint;
   const loc = await client.models.BusLocation.get({ busId: trip.busId });
   if (loc.data && (loc.data.lat !== 0 || loc.data.lng !== 0)) return { lat: loc.data.lat, lng: loc.data.lng };
   if (trip.startLocation) return trip.startLocation;
@@ -61,14 +73,26 @@ async function busOrigin(client: DataClient, trip: Trip): Promise<LatLng> {
   return settings?.schoolLocation ?? { lat: 0, lng: 0 };
 }
 
+/** Record the driver's position so the live map and the next route start from the right place. */
+async function upsertBusLocation(client: DataClient, busId: string, driverUserId: string, pos: LatLng, tripId: string | null) {
+  const existing = await client.models.BusLocation.get({ busId });
+  const base = { busId, lat: pos.lat, lng: pos.lng, updatedAt: nowIso(), tripId };
+  if (existing.data) await client.models.BusLocation.update(base);
+  else await client.models.BusLocation.create({ ...base, driverUserId, heading: 0, speed: 0, accuracy: 0 });
+}
+
 /** Compute + persist the route for a trip. Returns the refreshed Trip. */
-async function recompute(client: DataClient, trip: Trip, opts: { manualOrder?: string[]; force?: boolean; reason: string }): Promise<Trip> {
+async function recompute(
+  client: DataClient,
+  trip: Trip,
+  opts: { manualOrder?: string[]; force?: boolean; reason: string; origin?: LatLng | null },
+): Promise<Trip> {
   if (trip.status !== 'ACTIVE' && trip.status !== 'PLANNED') return trip;
   const meta = parseMeta(trip.routeMeta);
   const last = typeof meta.computedAt === 'string' ? Date.parse(meta.computedAt) : 0;
   if (!opts.force && !opts.manualOrder && Date.now() - last < ROUTE_RATE_LIMIT_MS) return trip; // rate-limited: serve cached
 
-  const [stops, settings, origin] = await Promise.all([loadStops(client, trip.id), getSettings(client, trip.schoolId), busOrigin(client, trip)]);
+  const [stops, settings, origin] = await Promise.all([loadStops(client, trip.id), getSettings(client, trip.schoolId), busOrigin(client, trip, opts.origin)]);
   const routable: RoutableStop[] = stops
     .filter((s) => ROUTED_STATUSES.includes(s.status) && s.location)
     .map((s) => ({ id: s.id, location: { lat: s.location!.lat, lng: s.location!.lng } }));
@@ -114,21 +138,27 @@ async function recompute(client: DataClient, trip: Trip, opts: { manualOrder?: s
 }
 
 // ────────────────────────────── operations ──────────────────────────────
-async function startTrip(client: DataClient, caller: Caller, args: { busId: string; type: TripType }): Promise<Trip> {
+async function startTrip(client: DataClient, caller: Caller, args: { busId: string; type: TripType; lat?: number | null; lng?: number | null }): Promise<Trip> {
   const profile = await requireDriverOfBus(client, caller, args.busId);
   const bus = unwrap(await client.models.Bus.get({ busId: args.busId }), 'Bus.get');
   const settings = await getSettings(client, bus.schoolId);
   const date = todayInTimezone(settings?.timezone);
+  const here = validLatLng(args.lat, args.lng);
 
   const todays = await listAll((nextToken) => client.models.Trip.listTripsByBusAndDate({ busId: args.busId, date: { eq: date } }, { limit: 20, nextToken }));
   const active = todays.find((x) => x.status === 'ACTIVE');
   if (active) {
-    if (active.type === args.type) return active; // idempotent
+    if (active.type === args.type) {
+      // Idempotent re-start (e.g. the app was reopened): still re-anchor the route to where the driver is now.
+      return here ? recompute(client, active, { force: true, reason: 'restart', origin: here }) : active;
+    }
     throw new HandlerError('End the current trip before starting another one', 'CONFLICT');
   }
 
   const loc = await client.models.BusLocation.get({ busId: args.busId });
-  const startLocation = loc.data && (loc.data.lat || loc.data.lng) ? { lat: loc.data.lat, lng: loc.data.lng } : (settings?.schoolLocation ?? undefined);
+  // The trip starts where the driver is: the live fix from the device, else the bus's last published
+  // position, else the school. The live fix is also written to BusLocation so parents see the bus there.
+  const startLocation = here ?? (loc.data && (loc.data.lat || loc.data.lng) ? { lat: loc.data.lat, lng: loc.data.lng } : (settings?.schoolLocation ?? undefined));
   const trip = unwrap(
     await client.models.Trip.create({
       busId: args.busId,
@@ -173,9 +203,10 @@ async function startTrip(client: DataClient, caller: Caller, args: { busId: stri
     });
   });
   await client.models.Trip.update({ id: trip.id, stopCount: riders.length });
-  if (loc.data) await client.models.BusLocation.update({ busId: args.busId, tripId: trip.id });
+  if (here) await upsertBusLocation(client, args.busId, bus.driverUserId ?? caller.sub, here, trip.id);
+  else if (loc.data) await client.models.BusLocation.update({ busId: args.busId, tripId: trip.id });
 
-  const routed = await recompute(client, { ...trip, stopCount: riders.length }, { force: true, reason: 'start' });
+  const routed = await recompute(client, { ...trip, stopCount: riders.length }, { force: true, reason: 'start', origin: here });
   await audit(client, { schoolId: bus.schoolId, actorId: caller.sub, actorName: caller.username, action: 'START_TRIP', entityType: 'Trip', entityId: trip.id, after: { type: args.type, date } });
   return routed;
 }
@@ -197,15 +228,24 @@ async function endTrip(client: DataClient, caller: Caller, args: { tripId: strin
   return updated;
 }
 
-async function computeTripRoute(client: DataClient, caller: Caller, args: { tripId: string; force?: boolean | null }): Promise<Trip> {
+async function computeTripRoute(
+  client: DataClient,
+  caller: Caller,
+  args: { tripId: string; force?: boolean | null; lat?: number | null; lng?: number | null },
+): Promise<Trip> {
   const trip = unwrap(await client.models.Trip.get({ id: args.tripId }), 'Trip.get');
   // Drivers, admins and the students of this bus may request a recompute (students after toggling
   // their day status). The 30 s rate limit keeps API cost bounded whoever calls.
+  let isDriver = false;
   if (!caller.isAdmin) {
     const profile = await getCallerProfile(client, caller);
     if (!profile || profile.busId !== trip.busId) throw new HandlerError('Not allowed', 'FORBIDDEN');
+    isDriver = profile.role === 'DRIVER';
   }
-  return recompute(client, trip, { force: !!args.force && caller.isAdmin, reason: caller.isAdmin ? 'admin' : 'request' });
+  // Only the driver's own device knows where the bus is; ignore positions sent by anyone else.
+  const here = isDriver || caller.isAdmin ? validLatLng(args.lat, args.lng) : null;
+  if (here && isDriver && trip.status === 'ACTIVE') await upsertBusLocation(client, trip.busId, caller.sub, here, trip.id);
+  return recompute(client, trip, { force: !!args.force && caller.isAdmin, reason: caller.isAdmin ? 'admin' : 'request', origin: here });
 }
 
 async function updateTripStop(client: DataClient, caller: Caller, args: { tripStopId: string; status: StopStatus; reason?: string | null }): Promise<TripStop> {

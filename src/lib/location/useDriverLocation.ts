@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Platform } from 'react-native';
 import * as Location from 'expo-location';
-import { handleLocationSample, getLastSample, gpsQuality, type GpsSample } from './busLocationTask';
+import { handleLocationSample, getLastSample, gpsQuality, toGpsSample, type GpsSample } from './busLocationTask';
 
 /**
  * Foreground GPS watcher for the driver screen. Publishes through the same throttled path as the
@@ -27,16 +26,10 @@ export function useDriverLocation(enabled: boolean) {
       subRef.current = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 2000, distanceInterval: 5 },
         (loc) => {
-          const s: GpsSample = {
-            lat: loc.coords.latitude,
-            lng: loc.coords.longitude,
-            heading: loc.coords.heading ?? null,
-            speed: loc.coords.speed ?? null,
-            accuracy: loc.coords.accuracy ?? null,
-            ts: loc.timestamp,
-          };
-          setSample(s);
-          if (Platform.OS === 'web' || true) void handleLocationSample(loc);
+          setSample(toGpsSample(loc));
+          // Publishes through the same throttled path as the background task (and is the only
+          // publisher on web / Expo Go, and before a trip starts).
+          void handleLocationSample(loc);
         },
       );
     })();

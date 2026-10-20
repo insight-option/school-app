@@ -16,8 +16,14 @@ type ActiveTrip = { busId: string; tripId: string };
 export const getActiveTrip = () => kv.getJSON<ActiveTrip>(KV_KEYS.activeTrip) ?? null;
 export const getLastSample = () => kv.getJSON<GpsSample>('driver.lastSample') ?? null;
 
-export async function handleLocationSample(loc: Location.LocationObject): Promise<boolean> {
-  const sample: GpsSample = {
+/** The signed-in driver's bus – lets the foreground watcher publish the bus position before a trip starts. */
+export function setDriverBusId(busId: string | null) {
+  if (busId) kv.setString(KV_KEYS.driverBusId, busId);
+  else kv.delete(KV_KEYS.driverBusId);
+}
+
+export function toGpsSample(loc: Location.LocationObject): GpsSample {
+  return {
     lat: loc.coords.latitude,
     lng: loc.coords.longitude,
     heading: loc.coords.heading ?? null,
@@ -25,13 +31,35 @@ export async function handleLocationSample(loc: Location.LocationObject): Promis
     accuracy: loc.coords.accuracy ?? null,
     ts: loc.timestamp,
   };
+}
+
+/** One-off fix for actions that need to know where the driver is right now (e.g. Start trip). */
+export async function getCurrentFix(timeoutMs = 8000): Promise<GpsSample | null> {
+  try {
+    const perm = await Location.getForegroundPermissionsAsync();
+    if (perm.status !== 'granted') return null;
+    const loc = await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+    if (loc) return toGpsSample(loc);
+    const last = await Location.getLastKnownPositionAsync({ maxAge: 2 * 60_000 });
+    return last ? toGpsSample(last) : getLastSample();
+  } catch {
+    return getLastSample();
+  }
+}
+
+export async function handleLocationSample(loc: Location.LocationObject): Promise<boolean> {
+  const sample = toGpsSample(loc);
   kv.setJSON('driver.lastSample', sample);
   const trip = getActiveTrip();
-  if (!trip) return false;
+  const busId = trip?.busId ?? kv.getString(KV_KEYS.driverBusId) ?? null;
+  if (!busId) return false;
   const last = kv.getJSON<LastPublish>(KV_KEYS.lastBusPublish) ?? null;
   if (!shouldPublish(sample, last)) return false;
   try {
-    await publishBusLocation({ busId: trip.busId, lat: sample.lat, lng: sample.lng, heading: sample.heading, speed: sample.speed, accuracy: sample.accuracy, tripId: trip.tripId });
+    await publishBusLocation({ busId, lat: sample.lat, lng: sample.lng, heading: sample.heading, speed: sample.speed, accuracy: sample.accuracy, tripId: trip?.tripId });
     kv.setJSON(KV_KEYS.lastBusPublish, { ts: Date.now(), lat: sample.lat, lng: sample.lng });
     return true;
   } catch (e) {
@@ -56,9 +84,15 @@ if (Platform.OS !== 'web') {
 export async function ensureLocationPermissions(background: boolean): Promise<'granted' | 'foreground-only' | 'denied'> {
   const fg = await Location.requestForegroundPermissionsAsync();
   if (fg.status !== 'granted') return 'denied';
-  if (!background || Platform.OS === 'web') return 'granted';
-  const bg = await Location.requestBackgroundPermissionsAsync();
-  return bg.status === 'granted' ? 'granted' : 'foreground-only';
+  // Expo Go and web have no background mode: asking would throw ERR_LOCATION_INFO_PLIST on iOS.
+  if (!background || !SUPPORTS_BACKGROUND_LOCATION) return 'granted';
+  try {
+    const bg = await Location.requestBackgroundPermissionsAsync();
+    return bg.status === 'granted' ? 'granted' : 'foreground-only';
+  } catch (e) {
+    console.warn('background location permission unavailable', e);
+    return 'foreground-only';
+  }
 }
 
 /** Start publishing for an active trip (background-capable on native, foreground watcher on web). */

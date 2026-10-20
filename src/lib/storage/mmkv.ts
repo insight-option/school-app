@@ -65,6 +65,7 @@ export const KV_KEYS = {
   queryCache: 'query.cache.v1',
   lastBusPublish: 'driver.lastBusPublish',
   activeTrip: 'driver.activeTrip',
+  driverBusId: 'driver.busId',
   pushToken: 'push.token',
   onboardingNotif: 'onboarding.notifications',
   colorScheme: 'settings.colorScheme',
