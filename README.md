@@ -14,7 +14,7 @@ school-app/
 ├─ src/components/          map (native + web), chat, driver, admin, feedback, …
 ├─ src/lib/                 amplify, auth session, i18n (en/ar), push, alarm, location task, storage, rules
 ├─ src/ui/                  design system (theme tokens, Button, Input, Card, Sheet, Toast, …)
-├─ scripts/                 seed.ts, create-admin.ts, smoke.ts
+├─ scripts/                 seed.ts, create-admin.ts, smoke.ts, wipe.ts
 ├─ __tests__/               unit tests (routing/chunking, auth routing, day status, alarm, throttle)
 └─ README.md · SEED.md · PERFORMANCE.md
 ```
@@ -76,6 +76,7 @@ all models/indexes (see `PERFORMANCE.md`), the private S3 bucket, Lambdas `admin
 ADMIN_USERNAME=ADMIN-01 ADMIN_PASSWORD='Admin#2026' ADMIN_EMAIL=office@yourschool.example npm run create-admin
 SEED_EMAIL=you@example.com npm run seed      # 1 school, 3 classes, 3 teachers, 2 buses, 24 students … (SEED.md)
 npm run smoke                                # signs in as each role and runs a query
+AWS_PROFILE=school npm run wipe -- --yes     # removes ALL data except ADMIN-01, T-1001, BUS-01 (SEED.md → "Wiping a deployment")
 ```
 
 ## 4. Run the app
@@ -250,7 +251,7 @@ error is the last `npm error` / `[ERROR]` line. The most common ones:
 | What | How |
 |---|---|
 | **Android APK** (real native build, Google Maps, no Expo Go needed) | EAS Build, profile `preview` (`eas.json`). Current APK (build `c9e5791e`, 2026-10-19): https://expo.dev/artifacts/eas/obSf0fDfOdeYsO5UfSec2_o0DYIwFjJKKYEx4K4E-rw.apk – open on the phone, allow "install unknown apps", install. All builds and their links: https://expo.dev/accounts/masta-jazz/projects/school-app/builds. Rebuild with `npx eas-cli build -p android --profile preview`. Signing uses the local keystore in `credentials/android/release.jks` + `credentials.json` (git-ignored; back them up, you need them for every future build). |
-| **iPhone without an Apple developer account** | Install **Expo Go** from the App Store, then open the latest update of the `preview` branch: https://expo.dev/accounts/masta-jazz/projects/school-app/updates (open the update → scan the QR / tap "Open in Expo Go"), or paste `exp://u.expo.dev/update/<iOS update id>` into Expo Go. Current update group `f6d742fa-a2ea-4023-afce-72571455887e` (iOS update `01a1548d-9ca9-786b-b302-0265494da620`). Publish a new one with `npx eas-cli update --branch preview --message "…"`. Expo Go limits: Apple Maps instead of Google Maps, sign-in uses the password flow instead of SRP, no background location (the driver's foreground tracking still publishes), no custom alarm channel on Android, in-memory storage. |
+| **iPhone without an Apple developer account** | Install **Expo Go** from the App Store, then open the latest update of the `preview` branch: https://expo.dev/accounts/masta-jazz/projects/school-app/updates (open the update → scan the QR / tap "Open in Expo Go"), or paste `exp://u.expo.dev/update/<iOS update id>` into Expo Go. Current update group `98e83d12-5f21-4ca4-a08a-0c62a04b07ff` (iOS update `01a15907-1ccc-75be-84a4-5f1d3f74c1af`). Publish a new one with `npx eas-cli update --branch preview --message "…"`. Expo Go limits: Apple Maps instead of Google Maps, sign-in uses the password flow instead of SRP, no background location (the driver's foreground tracking still publishes), no custom alarm channel on Android, in-memory storage. |
 | **iPhone / tablet with a dev server** | `npx expo start --tunnel` prints an `exp://…exp.direct` link that Expo Go on any network can open while the server runs. |
 | **Full-featured iOS build** | Needs an Apple developer account: `npx eas-cli build -p ios --profile preview` and install via TestFlight/internal distribution. |
 

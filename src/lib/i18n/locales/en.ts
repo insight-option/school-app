@@ -428,7 +428,7 @@ export const en = {
     disable: 'Disable',
     enable: 'Enable',
     disableConfirm: 'Disable this account? The user will not be able to sign in.',
-    deleteConfirm: 'Delete this account permanently? Their data is anonymised and they are removed from all chats.',
+    deleteConfirm: 'Delete this account permanently? The user is removed from the app together with their chats, notifications and transport records (for a driver: the bus and its trips too). This cannot be undone.',
     deleted: 'Account deleted',
     homeLocation: 'Home location',
     setHome: 'Set / override home location',

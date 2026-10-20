@@ -19,6 +19,8 @@ import {
   ensureBusGroup,
   ensureClassGroup,
   ensureOfficeConversation,
+  listMembers,
+  officeConversationId,
   removeMember,
 } from '../shared/conversations';
 import { HandlerError, opName, requireAdmin, type AppSyncEvent, type Caller } from '../shared/types';
@@ -660,47 +662,102 @@ async function setUserEnabled(client: DataClient, caller: Caller, args: { userna
   return { ok: true };
 }
 
+/** Remove a conversation together with every message and member row it owns. */
+async function deleteConversationCascade(client: DataClient, conversationId: string) {
+  const messages = await listAll(
+    (nextToken) => client.models.Message.listMessagesByConversation({ conversationId }, { limit: 200, nextToken }),
+    500,
+  );
+  await mapLimit(messages, 10, (m) => client.models.Message.delete({ id: m.id }));
+  const members = await listMembers(client, conversationId);
+  await mapLimit(members, 10, (m) => client.models.ConversationMember.delete({ conversationId: m.conversationId, userId: m.userId }));
+  await client.models.Conversation.delete({ id: conversationId });
+}
+
+/** Everything that hangs off a user whatever their role: chats, devices, notification inbox. */
+async function purgeUserData(client: DataClient, userId: string) {
+  const memberships = await listAll((nextToken) =>
+    client.models.ConversationMember.listMembershipsByUser({ userId }, { limit: 100, nextToken }),
+  );
+  await mapLimit(memberships, 4, async (m) => {
+    // Private chats (direct + office) disappear entirely; group chats just lose the member.
+    const isPrivate = m.conversationId.startsWith('dm_') || m.conversationId === officeConversationId(userId);
+    if (isPrivate) await deleteConversationCascade(client, m.conversationId);
+    else await removeMember(client, m.conversationId, m.userId);
+  });
+  const devices = await listAll((nextToken) => client.models.Device.listDevicesByUser({ userId }, { limit: 50, nextToken }));
+  await mapLimit(devices, 5, (d) => client.models.Device.delete({ id: d.id }));
+  const notifications = await listAll(
+    (nextToken) => client.models.Notification.listNotificationsByUser({ userId }, { limit: 200, nextToken }),
+    500,
+  );
+  await mapLimit(notifications, 10, (n) => client.models.Notification.delete({ id: n.id }));
+}
+
+/** Transport and learning records that only make sense while the student exists. */
+async function purgeStudentData(client: DataClient, profile: Profile) {
+  if (profile.classId) await bumpCount(client, 'class', profile.classId, -1);
+  if (profile.busId) await bumpCount(client, 'bus', profile.busId, -1);
+  const studentId = profile.userId;
+  const statuses = await listAll((nextToken) => client.models.StudentDayStatus.list({ studentId, limit: 200, nextToken }));
+  await mapLimit(statuses, 10, (s) => client.models.StudentDayStatus.delete({ studentId: s.studentId, date: s.date }));
+  const stops = await listAll((nextToken) => client.models.TripStop.listStopsByStudentAndDate({ studentId }, { limit: 200, nextToken }), 500);
+  await mapLimit(stops, 10, (s) => client.models.TripStop.delete({ id: s.id }));
+  const feedback = await listAll((nextToken) => client.models.Feedback.listFeedbackByStudent({ studentId }, { limit: 200, nextToken }));
+  await mapLimit(feedback, 10, (f) => client.models.Feedback.delete({ id: f.id }));
+  const enrollments = await listAll((nextToken) => client.models.CourseEnrollment.listEnrollmentsByStudent({ studentId }, { limit: 200, nextToken }));
+  await mapLimit(enrollments, 10, (e) => client.models.CourseEnrollment.delete({ id: e.id }));
+}
+
+/** A bus is its driver's account: remove the bus, its live position, trips, day statuses and group chat. */
+async function deleteBusCascade(client: DataClient, busId: string) {
+  const students = await listAll((nextToken) => client.models.Profile.listProfilesByBus({ busId }, { limit: 200, nextToken }));
+  await mapLimit(students, 5, (s) => client.models.Profile.update({ userId: s.userId, busId: null, busName: null }));
+  const statuses = await listAll(
+    (nextToken) => client.models.StudentDayStatus.listDayStatusByBusAndDate({ busId }, { limit: 200, nextToken }),
+    500,
+  );
+  await mapLimit(statuses, 10, (s) => client.models.StudentDayStatus.delete({ studentId: s.studentId, date: s.date }));
+  const trips = await listAll((nextToken) => client.models.Trip.listTripsByBusAndDate({ busId }, { limit: 100, nextToken }), 500);
+  await mapLimit(trips, 3, async (trip) => {
+    const stops = await listAll((nextToken) => client.models.TripStop.listStopsByTrip({ tripId: trip.id }, { limit: 200, nextToken }));
+    await mapLimit(stops, 10, (s) => client.models.TripStop.delete({ id: s.id }));
+    await client.models.Trip.delete({ id: trip.id });
+  });
+  const group = await client.models.Conversation.get({ id: busConversationId(busId) });
+  if (group.data) await deleteConversationCascade(client, group.data.id);
+  await client.models.BusLocation.delete({ busId });
+  await client.models.Bus.delete({ busId });
+}
+
+/**
+ * Hard delete: the Cognito account, the profile and everything that belongs to the user are
+ * removed. Group-chat messages the user sent stay (they carry the sender name); audit rows stay.
+ */
 async function deleteUser(client: DataClient, caller: Caller, args: { username: string }) {
   const user = parse(username, args.username);
   const profile = await getProfileByUsername(client, user);
   if (profile && profile.userId === caller.sub) throw new HandlerError('You cannot delete your own account', 'FORBIDDEN');
   await deleteCognitoUser(user);
-  if (!profile) return { ok: true, message: 'Cognito user removed; no profile existed' };
-
-  const memberships = await listAll((nextToken) =>
-    client.models.ConversationMember.listMembershipsByUser({ userId: profile.userId }, { limit: 100, nextToken }),
-  );
-  await mapLimit(memberships, 5, (m) => removeMember(client, m.conversationId, m.userId));
-  const devices = await listAll((nextToken) => client.models.Device.listDevicesByUser({ userId: profile.userId }, { limit: 50, nextToken }));
-  await mapLimit(devices, 5, (d) => client.models.Device.delete({ id: d.id }));
-  if (profile.role === 'STUDENT') {
-    if (profile.classId) await bumpCount(client, 'class', profile.classId, -1);
-    if (profile.busId) await bumpCount(client, 'bus', profile.busId, -1);
+  if (!profile) {
+    // A bus registered under this ID whose profile is already gone still has to go.
+    const bus = await client.models.Bus.get({ busId: user });
+    if (bus.data) await deleteBusCascade(client, user);
+    return { ok: true, message: 'Cognito user removed; no profile existed' };
   }
+
+  await purgeUserData(client, profile.userId);
+  if (profile.role === 'STUDENT') await purgeStudentData(client, profile);
   if (profile.role === 'TEACHER') {
     const classes = await listAll((nextToken) => client.models.Class.listClassesByTeacher({ teacherId: profile.userId }, { limit: 50, nextToken }));
     await mapLimit(classes, 5, (c) => client.models.Class.update({ id: c.id, teacherId: null, teacherName: null }));
   }
-  if (profile.role === 'DRIVER' && profile.busId) {
-    await client.models.Bus.update({ busId: profile.busId, isActive: false, driverUserId: null });
+  if (profile.role === 'DRIVER') {
+    const busId = profile.busId ?? user;
+    const bus = await client.models.Bus.get({ busId });
+    if (bus.data) await deleteBusCascade(client, busId);
   }
-  await client.models.Profile.update({
-    userId: profile.userId,
-    fullName: 'Deleted user',
-    email: null,
-    phone: null,
-    parentEmail: null,
-    parentPhone: null,
-    homeAddress: null,
-    homeLocation: null,
-    avatarKey: null,
-    classId: null,
-    className: null,
-    busId: null,
-    busName: null,
-    classIds: [],
-    isActive: false,
-  });
+  await client.models.Profile.delete({ userId: profile.userId });
   await audit(client, {
     schoolId: caller.schoolId,
     actorId: caller.sub,

@@ -55,8 +55,28 @@ export function useSaveClass() {
 export function useDeleteClass() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => unwrap(await client.models.Class.delete({ id }), 'class'),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['classes'] }),
+    mutationFn: async (id: string) => {
+      // Detach students, the teacher and courses, drop the class group chat, then the class itself.
+      const students = await listAll((nextToken) => client.models.Profile.listProfilesByClass({ classId: id }, { limit: 200, nextToken }));
+      await Promise.all(students.map((s) => client.models.Profile.update({ userId: s.userId, classId: null, className: null })));
+      const cls = unwrap(await client.models.Class.get({ id }), 'class');
+      if (cls?.teacherId) {
+        const teacher = unwrap(await client.models.Profile.get({ userId: cls.teacherId }), 'teacher');
+        if (teacher) await client.models.Profile.update({ userId: teacher.userId, classIds: (teacher.classIds ?? []).filter((c) => c !== id) });
+      }
+      const courses = await listAll((nextToken) => client.models.Course.listCoursesByClass({ classId: id }, { limit: 200, nextToken }));
+      await Promise.all(courses.map((c) => client.models.Course.update({ id: c.id, classId: null, className: null })));
+      const conversationId = `class_${id}`;
+      const messages = await listAll((nextToken) => client.models.Message.listMessagesByConversation({ conversationId }, { limit: 200, nextToken }), 100);
+      await Promise.all(messages.map((m) => client.models.Message.delete({ id: m.id })));
+      const members = await listAll((nextToken) => client.models.ConversationMember.list({ conversationId, limit: 200, nextToken }));
+      await Promise.all(members.map((m) => client.models.ConversationMember.delete({ conversationId: m.conversationId, userId: m.userId })));
+      await client.models.Conversation.delete({ id: conversationId });
+      return unwrap(await client.models.Class.delete({ id }), 'class');
+    },
+    onSuccess: () => {
+      for (const key of ['classes', 'profiles', 'profile', 'inbox', 'conversation', 'conversations', 'courses']) void qc.invalidateQueries({ queryKey: [key] });
+    },
   });
 }
 
@@ -129,9 +149,10 @@ export function useDeleteUser() {
   return useMutation({
     mutationFn: async (username: string) => unwrap(await client.mutations.deleteUser({ username }), 'delete user'),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['profiles'] });
-      void qc.invalidateQueries({ queryKey: ['classes'] });
-      void qc.invalidateQueries({ queryKey: ['buses'] });
+      // A hard delete touches people, transport, chats and inboxes – refresh every cached list.
+      for (const key of ['profiles', 'profile', 'classes', 'buses', 'bus', 'busLocation', 'trips', 'trip', 'stops', 'dayStatus', 'inbox', 'conversation', 'conversations', 'members', 'messages', 'feedback', 'notifications', 'devices']) {
+        void qc.invalidateQueries({ queryKey: [key] });
+      }
     },
   });
 }

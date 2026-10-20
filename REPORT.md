@@ -124,3 +124,19 @@ Deployment 3 (commit `4010d4d`) succeeded. Hosting configuration done through th
 | Expo / EAS | Project `e081390e-15bc-4648-8903-133ad6b3eb9b` created under `masta-jazz`; `EXPO_PUBLIC_EAS_PROJECT_ID` set on Amplify and in `app.config.ts`; `eas.json` profiles; EAS Update published to branch `preview` (Expo Go link); Android APK built with the `preview` profile and a locally generated keystore |
 | Native fixes found by the first builds | `aws-amplify` needs `@aws-amplify/react-native`, async-storage, get-random-values and url-polyfill on native (the export failed without them); Expo Go has no SRP module, so the user-pool client now also allows `USER_PASSWORD_AUTH` and the app uses it only inside Expo Go; MMKV falls back to memory and the map to Apple Maps inside Expo Go |
 | Branch backend | user pool `ap-south-1_NBbyBcsLa`, seeded with the same demo data as the sandbox (`AMPLIFY_OUTPUTS=… npm run seed`) |
+
+## Hard delete and data wipe (2026-10-20)
+
+Deleting a person from the office used to be a soft delete: the Cognito account went, but the
+profile stayed as "Deleted user" and a driver's bus was only disabled, so rows lingered in every
+list. `deleteUser` now cascades: profile, devices, notifications, private chats (direct + office),
+group-chat memberships; for students also day statuses, trip stops, feedback, enrolments and the
+class/bus counters; for drivers the bus, its live position, trips with stops and the bus group chat,
+and the students are detached from the bus. Deleting a class detaches its students, teacher and
+courses and removes the class group chat. Group messages a deleted person sent and audit rows stay.
+
+`npm run wipe -- --yes` (`scripts/wipe.ts`, documented in `SEED.md`) empties a backend except
+`SchoolSettings`, the branding files and the accounts in `KEEP_USERS`. It was run against the hosting
+backend to clear the demo data; the hosted `admin-users` Lambda was hot-patched with the new bundle
+(same esbuild settings Amplify uses) and verified on real rows before the wipe, and the next
+`git push` redeploys the identical code through the pipeline.

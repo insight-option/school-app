@@ -60,3 +60,32 @@ driver – runs a full trip through the Lambdas: `startTrip` → `computeTripRou
    the stop. Toggle **Not going today** – the driver's marker turns red instantly.
 3. On the driver, tap a student marker → **ALARM**: the student's phone rings until **I'm coming**.
 4. Mark boarded → the parent gets the "Boarded" push and the stop shows in trip history.
+
+## Wiping a deployment
+
+`npm run wipe -- --yes` (= `tsx scripts/wipe.ts`) empties a backend so you can start from scratch
+in the office. It deletes **every** table row, Cognito account and media object except:
+
+- `SchoolSettings` and the branding files under `school/` (change name, logo and colours in
+  Office → Settings);
+- the accounts in `KEEP_USERS` (default `ADMIN-01,T-1001,BUS-01`). They are reset: no class, no
+  bus, no avatar, active. A kept driver keeps its (now empty) bus, its live-position row and the bus
+  group chat; all other chats are removed. A kept name that no longer exists in Cognito is skipped.
+
+It talks to DynamoDB, Cognito and S3 directly with your AWS credentials, so it needs admin-level
+access to the backend's account and does not depend on the app's auth rules:
+
+```bash
+AWS_PROFILE=school npm run wipe -- --yes                               # backend in amplify_outputs.json
+AMPLIFY_OUTPUTS=./hosting/amplify_outputs.json npm run wipe -- --yes   # another backend's outputs
+KEEP_USERS=ADMIN-01 npm run wipe -- --yes                              # keep only the office account
+```
+
+Table names are `<Model>-<AppSync api id>-NONE`; the script finds the api id through the AWS CLI
+(`aws appsync list-graphql-apis`) or, without the CLI, from the table names. Set `AMPLIFY_API_ID`
+when several Amplify data APIs live in the same account.
+
+Deleting from the office (student, teacher or bus page → **Delete**) is a hard delete too: the
+Cognito account, profile, devices, notifications, private chats, day statuses, trip stops, feedback
+and enrolments go; a driver takes the bus, its trips, position and group chat with it. Messages the
+person sent in group chats stay (they carry the sender name), as do audit rows.
