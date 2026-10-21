@@ -306,6 +306,7 @@ export const en = {
     optimizedOrder: 'Optimized order',
     routeSource: { GOOGLE: 'Live traffic route', FALLBACK: 'Approximate route (no routing key)' },
     summary: 'Going {{going}} · Not going {{notGoing}} · Boarded {{boarded}}',
+    remainingRoute: '{{distance}} left',
     messageAll: 'Message all',
     busGroup: 'Bus group',
     students: 'Students',

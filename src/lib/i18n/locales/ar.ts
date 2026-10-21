@@ -308,6 +308,7 @@ export const ar: TranslationKeys = {
     optimizedOrder: 'ترتيب محسّن',
     routeSource: { GOOGLE: 'مسار بحركة المرور الحية', FALLBACK: 'مسار تقريبي (بدون مفتاح توجيه)' },
     summary: 'ذاهب {{going}} · غير ذاهب {{notGoing}} · صعد {{boarded}}',
+    remainingRoute: 'متبقٍ {{distance}}',
     messageAll: 'مراسلة الجميع',
     busGroup: 'مجموعة الحافلة',
     students: 'الطلاب',

@@ -16,7 +16,15 @@ export function useDriverLocation(enabled: boolean) {
     if (!enabled) return;
     let cancelled = false;
     (async () => {
-      const perm = await Location.requestForegroundPermissionsAsync();
+      let perm: Location.PermissionResponse;
+      try {
+        perm = await Location.requestForegroundPermissionsAsync();
+      } catch (e) {
+        // e.g. ERR_LOCATION_INFO_PLIST in a client without location usage strings – never crash the screen.
+        console.warn('location permission request failed', e);
+        if (!cancelled) setPermission('denied');
+        return;
+      }
       if (cancelled) return;
       if (perm.status !== 'granted') {
         setPermission('denied');

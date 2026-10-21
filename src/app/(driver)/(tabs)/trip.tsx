@@ -16,9 +16,9 @@ import { routeMetaOf, useActiveTrip, useComputeRoute, useEndTrip, useNotifyBusNe
 import { useBusDayStatusSubscription, useBusDayStatuses } from '../../../features/dayStatus';
 import { useDriverLocation } from '../../../lib/location/useDriverLocation';
 import { ensureLocationPermissions, getCurrentFix, setDriverBusId, startBusLocationUpdates, stopBusLocationUpdates } from '../../../lib/location/busLocationTask';
-import { decodePolyline, distanceToPolylineMeters, haversineMeters } from '../../../lib/geo';
+import { decodePolyline, distanceToPolylineMeters, haversineMeters, pathLengthMeters, remainingPath } from '../../../lib/geo';
 import { initials } from '../../../ui/theme';
-import { todayIn } from '../../../lib/util/format';
+import { formatDistance, todayIn } from '../../../lib/util/format';
 import type { TripStop, TripType } from '../../../lib/data/client';
 import { haptic } from '../../../lib/util/device';
 
@@ -107,6 +107,9 @@ export default function DriverTripScreen() {
 
   const encoded = trip?.routePolyline ?? null;
   const polyline = useMemo(() => (encoded ? decodePolyline(encoded) : []), [encoded]);
+  // Only the part of the route still ahead of the bus is drawn, and summed for "x km left".
+  const ahead = useMemo(() => (busPos && polyline.length > 1 ? remainingPath(busPos, polyline) : polyline), [busPos?.lat, busPos?.lng, polyline]); // eslint-disable-line react-hooks/exhaustive-deps
+  const remainingMeters = useMemo(() => pathLengthMeters(ahead), [ahead]);
   const meta = routeMetaOf(trip);
 
   // ── Off-route detection (>300 m for >60 s) ──
@@ -283,6 +286,7 @@ export default function DriverTripScreen() {
         </ScrollView>
         <Text variant="captionStrong" color="textMuted" style={{ paddingHorizontal: 12, paddingBottom: 6 }}>
           {t('driver.summary', counts)}
+          {trip && remainingMeters > 0 ? ` · ${t('driver.remainingRoute', { distance: formatDistance(remainingMeters) })}` : ''}
         </Text>
       </View>
 
@@ -291,7 +295,7 @@ export default function DriverTripScreen() {
           <MapView
             ref={mapRef}
             markers={markers}
-            polyline={polyline}
+            polyline={ahead}
             polylineColor={theme.colors.primary}
             showsTraffic={traffic}
             showsUserLocation={false}
