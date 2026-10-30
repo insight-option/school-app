@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Avatar, Button, Chip, ListItem, Screen, Sheet, useTheme } from '../../../ui';
 import { InboxList } from '../../../components/chat/InboxList';
-import { OFFICE_USER_ID, useGroupConversations } from '../../../features/messaging';
+import { useGroupConversations, useOfficeSeat } from '../../../features/messaging';
 import { useMessageReports, useResolveReport } from '../../../features/ops';
 import { timeAgoShort } from '../../../lib/util/format';
 
@@ -15,6 +15,7 @@ export default function AdminMessages() {
   const router = useRouter();
   const [tab, setTab] = useState<'inbox' | 'groups' | 'reports'>('inbox');
   const groups = useGroupConversations(tab === 'groups');
+  const officeSeat = useOfficeSeat();
   const reports = useMessageReports(tab === 'reports');
   const resolve = useResolveReport();
   const [reportOpen, setReportOpen] = useState<string | null>(null);
@@ -31,7 +32,7 @@ export default function AdminMessages() {
   return (
     <Screen padded={false} title={t('admin.messages')} right={<Button size="sm" icon="create-outline" title={t('admin.newMessage')} onPress={() => router.push('/(admin)/messages/new')} />}>
       {tab === 'inbox' ? (
-        <InboxList seatUserId={OFFICE_USER_ID} header={header} />
+        <InboxList seatUserId={officeSeat} header={header} />
       ) : tab === 'groups' ? (
         <ScrollView>
           {header}

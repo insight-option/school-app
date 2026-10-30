@@ -3,61 +3,54 @@ import { adminUsers } from '../functions/admin-users/resource';
 import { comms } from '../functions/comms/resource';
 
 /**
- * Private S3 bucket. Every path is explicit; nothing is public.
+ * Private S3 bucket. Every path is explicit; nothing is public except school directory media.
  * Clients always fetch short-lived signed URLs (see src/lib/storage/s3.ts).
  *
- * Every signed-in user belongs to exactly one Cognito group, and the identity pool hands group
- * members their *group* IAM role (token-based role mapping), not the generic "authenticated" role.
- * `allow.authenticated` and `allow.entity` therefore never apply to real users of this app, so each
- * path lists the groups explicitly (2026-10-20: drivers/students/teachers got AccessDenied on
- * every upload and download until this was added). The authenticated/entity rules stay for
- * completeness (users outside any group).
+ * Multi-school isolation:
+ *  - Readers get `get` (download a known key) but never `list`, so nobody can enumerate another
+ *    school's files. Keys contain 128-bit random ids and are only discoverable through data that is
+ *    already school-scoped (messages, feedback, courses …).
+ *  - Per-person folders (`avatars/`, `school-media/`, `imports/`) are keyed by the Cognito identity id
+ *    and only that identity may write there. Every signed-in user belongs to one Cognito group and
+ *    therefore receives the group's IAM role (token-based role mapping), which Amplify's
+ *    `allow.entity` rules do not cover – backend.ts adds the identity-scoped write statements to the
+ *    group roles.
+ *  - `school-media/` holds logos and cover photos of the public school directory: guests can view them.
  */
 const MEMBERS = ['TEACHER', 'DRIVER', 'STUDENT'];
+const EVERYONE = ['ADMIN', ...MEMBERS];
 
 export const storage = defineStorage({
   name: 'schoolMedia',
   access: (allow) => ({
-    // Profile pictures: keys are avatars/<identity id>/…; the app only ever writes its own folder.
+    // Profile pictures: avatars/<identity id>/…, viewable by every signed-in user who has the key.
     'avatars/{entity_id}/*': [
-      allow.entity('identity').to(['read', 'write', 'delete']),
-      allow.authenticated.to(['read']),
-      allow.groups(['ADMIN', ...MEMBERS]).to(['read', 'write', 'delete']),
+      allow.entity('identity').to(['get', 'write', 'delete']),
+      allow.authenticated.to(['get']),
+      allow.groups(EVERYONE).to(['get']),
     ],
-    // Chat attachments: any signed-in member can upload/read; only admins delete.
+    // Public school directory media (logos, covers): school-media/<identity id>/…
+    'school-media/{entity_id}/*': [
+      allow.entity('identity').to(['get', 'write', 'delete']),
+      allow.guest.to(['get']),
+      allow.authenticated.to(['get']),
+      allow.groups(EVERYONE).to(['get']),
+    ],
+    // Chat attachments: chat/<conversationId>/<random>…; members upload, nobody lists.
     'chat/*': [
-      allow.authenticated.to(['read', 'write']),
-      allow.groups(MEMBERS).to(['read', 'write']),
-      allow.groups(['ADMIN']).to(['read', 'write', 'delete']),
+      allow.groups(EVERYONE).to(['get', 'write']),
       allow.resource(comms).to(['read']),
     ],
-    // Feedback attachments: teachers & admins write; everyone signed-in can read (feedback rows are
-    // only returned to the student they concern, see data auth rules).
-    'feedback/*': [
-      allow.groups(['TEACHER']).to(['read', 'write']),
-      allow.groups(['ADMIN']).to(['read', 'write', 'delete']),
-      allow.groups(['STUDENT', 'DRIVER']).to(['read']),
-    ],
-    'broadcasts/*': [
-      allow.groups(['ADMIN']).to(['read', 'write', 'delete']),
-      allow.groups(MEMBERS).to(['read']),
-      allow.authenticated.to(['read']),
-    ],
-    'school/branding/*': [
-      allow.groups(['ADMIN']).to(['read', 'write', 'delete']),
-      allow.groups(MEMBERS).to(['read']),
-      allow.authenticated.to(['read']),
-      allow.guest.to(['read']),
-    ],
-    'courses/*': [
-      allow.groups(['ADMIN']).to(['read', 'write', 'delete']),
-      allow.groups(MEMBERS).to(['read']),
-      allow.authenticated.to(['read']),
-    ],
-    // CSV imports: admins upload under imports/<identity id>/…; the import Lambda reads them.
+    // Feedback attachments: teachers & the office write; the family reads (rows are school-scoped).
+    'feedback/*': [allow.groups(['TEACHER', 'ADMIN']).to(['get', 'write']), allow.groups(['STUDENT', 'DRIVER']).to(['get'])],
+    'broadcasts/*': [allow.groups(['ADMIN']).to(['get', 'write']), allow.groups(MEMBERS).to(['get'])],
+    // Legacy location of the first school's logo (new uploads go to school-media/).
+    'school/branding/*': [allow.guest.to(['get']), allow.authenticated.to(['get']), allow.groups(EVERYONE).to(['get'])],
+    'courses/*': [allow.groups(['ADMIN']).to(['get', 'write']), allow.groups(MEMBERS).to(['get'])],
+    // CSV imports: imports/<identity id>/…; the import Lambda reads them.
     'imports/{entity_id}/*': [
-      allow.entity('identity').to(['read', 'write', 'delete']),
-      allow.groups(['ADMIN']).to(['read', 'write', 'delete']),
+      allow.entity('identity').to(['get', 'write', 'delete']),
+      allow.groups(['ADMIN']).to(['get']),
       allow.resource(adminUsers).to(['read', 'write']),
     ],
   }),

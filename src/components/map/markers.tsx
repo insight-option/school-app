@@ -21,16 +21,18 @@ export function StudentMarkerView({ initials, color, order, selected }: { initia
   );
 }
 
+/** Navigation-style bus: soft halo, solid disc, white arrow pointing along the heading. */
 export function BusMarkerView({ heading, color }: { heading?: number | null; color?: string }) {
+  const c = color ?? '#2563EB';
+  const halo = /^#[0-9a-fA-F]{6}$/.test(c) ? `${c}33` : 'rgba(37,99,235,0.2)';
+  // The "navigate" glyph points north-east; rotate by heading − 45° so 0° points north.
   return (
-    <View style={[styles.wrap, { width: 60, height: 60 }]}>
-      <View style={[styles.busOuter, { borderColor: color ?? '#2563EB' }]}>
-        <View style={{ transform: [{ rotate: `${heading ?? 0}deg` }] }}>
-          <Ionicons name="navigate" size={22} color={color ?? '#2563EB'} />
+    <View style={[styles.wrap, { width: 76, height: 76 }]}>
+      <View style={[styles.busHalo, { backgroundColor: halo }]} />
+      <View style={[styles.busCore, { backgroundColor: c }]}>
+        <View style={{ transform: [{ rotate: `${(heading ?? 0) - 45}deg` }] }}>
+          <Ionicons name="navigate" size={22} color="#fff" />
         </View>
-      </View>
-      <View style={[styles.busTag, { backgroundColor: color ?? '#2563EB' }]}>
-        <Ionicons name="bus" size={12} color="#fff" />
       </View>
     </View>
   );
@@ -69,7 +71,7 @@ const styles = StyleSheet.create({
   circle: { alignItems: 'center', justifyContent: 'center', borderColor: '#fff', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
   orderBadge: { position: 'absolute', top: 0, right: 0, minWidth: 22, height: 22, borderRadius: 11, backgroundColor: '#0F172A', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5, borderWidth: 2, borderColor: '#fff' },
   orderText: { color: '#fff', fontSize: 11, fontWeight: '800', lineHeight: 13 },
-  busOuter: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#fff', borderWidth: 3, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 5 },
-  busTag: { position: 'absolute', bottom: 2, right: 6, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff' },
+  busHalo: { position: 'absolute', width: 70, height: 70, borderRadius: 35 },
+  busCore: { width: 44, height: 44, borderRadius: 22, borderWidth: 3, borderColor: '#fff', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 6, shadowOffset: { width: 0, height: 3 }, elevation: 6 },
   square: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#fff', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
 });

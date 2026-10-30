@@ -2,6 +2,7 @@ import {
   AdminAddUserToGroupCommand,
   AdminCreateUserCommand,
   AdminDeleteUserCommand,
+  AdminGetUserCommand,
   AdminDisableUserCommand,
   AdminEnableUserCommand,
   AdminSetUserPasswordCommand,
@@ -23,7 +24,12 @@ import {
   officeConversationId,
   removeMember,
 } from '../shared/conversations';
-import { HandlerError, opName, requireAdmin, type AppSyncEvent, type Caller } from '../shared/types';
+import { HandlerError, opName, requireIdentity, type AppSyncEvent } from '../shared/types';
+import { assertSameSchool, resolveAdmin, type SchoolCaller } from '../shared/caller';
+import { registerSchool, saveSchoolProfile, syncMyAccess } from './schools';
+
+/** Every admin operation below acts for the caller's own school (schoolId pinned from their profile). */
+type Caller = SchoolCaller;
 
 type Env = DataEnv & {
   USER_POOL_ID: string;
@@ -209,16 +215,24 @@ async function getProfileByUsername(client: DataClient, user: string): Promise<P
   return res.data[0];
 }
 
-async function getClass(client: DataClient, classId: string) {
+async function getClass(client: DataClient, classId: string, schoolId: string) {
   const res = await client.models.Class.get({ id: classId });
-  if (!res.data) throw new HandlerError(`Class ${classId} not found`, 'NOT_FOUND');
+  if (!res.data || res.data.schoolId !== schoolId) throw new HandlerError(`Class ${classId} not found`, 'NOT_FOUND');
   return res.data;
 }
 
-async function getBus(client: DataClient, busId: string) {
+async function getBus(client: DataClient, busId: string, schoolId: string) {
   const res = await client.models.Bus.get({ busId });
-  if (!res.data) throw new HandlerError(`Bus ${busId} not found`, 'NOT_FOUND');
+  if (!res.data || res.data.schoolId !== schoolId) throw new HandlerError(`Bus ${busId} not found`, 'NOT_FOUND');
   return res.data;
+}
+
+/** A user of the caller's school, by school ID number; other schools' users are "not found". */
+async function getSchoolProfile(client: DataClient, caller: Caller, user: string): Promise<Profile> {
+  const profile = await getProfileByUsername(client, user);
+  if (!profile) throw new HandlerError('User not found', 'NOT_FOUND');
+  assertSameSchool(caller, profile.schoolId, 'User');
+  return profile;
 }
 
 async function bumpCount(client: DataClient, kind: 'class' | 'bus', id: string, delta: number) {
@@ -247,7 +261,7 @@ async function applyStudentAssignment(
       await bumpCount(client, 'class', profile.classId, -1);
     }
     if (target.classId) {
-      const cls = await getClass(client, target.classId);
+      const cls = await getClass(client, target.classId, actor.schoolId);
       await ensureClassGroup(client, { id: cls.id, name: cls.name, schoolId: cls.schoolId });
       await addUserToGroup(client, classConversationId(cls.id), 'CLASS_GROUP', cls.name, 'Class group', student);
       await bumpCount(client, 'class', cls.id, +1);
@@ -266,7 +280,7 @@ async function applyStudentAssignment(
       await bumpCount(client, 'bus', profile.busId, -1);
     }
     if (target.busId) {
-      const bus = await getBus(client, target.busId);
+      const bus = await getBus(client, target.busId, actor.schoolId);
       await ensureBusGroup(client, { busId: bus.busId, plate: bus.plate, schoolId: bus.schoolId });
       await addUserToGroup(client, busConversationId(bus.busId), 'BUS_GROUP', `Bus ${bus.plate}`, 'Bus group', student);
       await bumpCount(client, 'bus', bus.busId, +1);
@@ -297,8 +311,8 @@ async function applyStudentAssignment(
 async function createStudent(client: DataClient, caller: Caller, raw: unknown, sendEmail = true) {
   const input = parse(StudentInput, raw);
   if (await getProfileByUsername(client, input.username)) throw new HandlerError(`ID "${input.username}" already exists`, 'CONFLICT');
-  const cls = input.classId ? await getClass(client, input.classId) : undefined;
-  const bus = input.busId ? await getBus(client, input.busId) : undefined;
+  const cls = input.classId ? await getClass(client, input.classId, caller.schoolId) : undefined;
+  const bus = input.busId ? await getBus(client, input.busId, caller.schoolId) : undefined;
 
   const sub = await createCognitoUser({
     username: input.username,
@@ -445,6 +459,7 @@ async function createBus(client: DataClient, caller: Caller, raw: unknown) {
     unwrap(
       await client.models.BusLocation.create({
         busId: input.username,
+        schoolId: caller.schoolId,
         driverUserId: sub,
         lat: start.lat,
         lng: start.lng,
@@ -602,8 +617,7 @@ async function resetUserPassword(
 ) {
   const user = parse(username, args.username);
   const pwd = parse(password, args.newPassword);
-  const profile = await getProfileByUsername(client, user);
-  if (!profile) throw new HandlerError('User not found', 'NOT_FOUND');
+  const profile = await getSchoolProfile(client, caller, user);
   try {
     await cognito.send(new AdminSetUserPasswordCommand({ UserPoolId: env.USER_POOL_ID, Username: user, Password: pwd, Permanent: !!args.permanent }));
   } catch (e) {
@@ -615,7 +629,7 @@ async function resetUserPassword(
   let emailSent = false;
   const to = profile.role === 'STUDENT' ? (profile.parentEmail ?? profile.email) : profile.email;
   if (args.sendEmail && to) {
-    const school = env.SCHOOL_NAME ?? 'School';
+    const school = (await client.models.SchoolSettings.get({ schoolId: caller.schoolId })).data?.name ?? 'School';
     emailSent = await sendCredentialsEmail(
       to,
       `${school} – your password was reset`,
@@ -645,8 +659,8 @@ async function resetUserPassword(
 
 async function setUserEnabled(client: DataClient, caller: Caller, args: { username: string; enabled: boolean }) {
   const user = parse(username, args.username);
-  const profile = await getProfileByUsername(client, user);
-  if (!profile) throw new HandlerError('User not found', 'NOT_FOUND');
+  const profile = await getSchoolProfile(client, caller, user);
+  if (profile.userId === caller.sub && !args.enabled) throw new HandlerError('You cannot disable your own account', 'FORBIDDEN');
   if (args.enabled) await cognito.send(new AdminEnableUserCommand({ UserPoolId: env.USER_POOL_ID, Username: user }));
   else await cognito.send(new AdminDisableUserCommand({ UserPoolId: env.USER_POOL_ID, Username: user }));
   await client.models.Profile.update({ userId: profile.userId, isActive: args.enabled });
@@ -738,13 +752,25 @@ async function deleteUser(client: DataClient, caller: Caller, args: { username: 
   const user = parse(username, args.username);
   const profile = await getProfileByUsername(client, user);
   if (profile && profile.userId === caller.sub) throw new HandlerError('You cannot delete your own account', 'FORBIDDEN');
-  await deleteCognitoUser(user);
+  if (profile) assertSameSchool(caller, profile.schoolId, 'User');
   if (!profile) {
-    // A bus registered under this ID whose profile is already gone still has to go.
-    const bus = await client.models.Bus.get({ busId: user });
-    if (bus.data) await deleteBusCascade(client, user);
-    return { ok: true, message: 'Cognito user removed; no profile existed' };
+    // Orphaned login or bus without a profile: only remove it when it belongs to this school.
+    const bus = (await client.models.Bus.get({ busId: user })).data;
+    let cognitoSchool: string | undefined;
+    try {
+      const u = await cognito.send(new AdminGetUserCommand({ UserPoolId: env.USER_POOL_ID, Username: user }));
+      cognitoSchool = u.UserAttributes?.find((a) => a.Name === 'custom:schoolId')?.Value;
+    } catch (e) {
+      if ((e as { name?: string }).name !== 'UserNotFoundException') throw e;
+    }
+    if ((bus && bus.schoolId !== caller.schoolId) || (cognitoSchool && cognitoSchool !== caller.schoolId) || (!bus && !cognitoSchool)) {
+      throw new HandlerError('User not found', 'NOT_FOUND');
+    }
+    if (cognitoSchool) await deleteCognitoUser(user);
+    if (bus) await deleteBusCascade(client, user);
+    return { ok: true, message: 'Removed the account (no profile existed)' };
   }
+  await deleteCognitoUser(user);
 
   await purgeUserData(client, profile.userId);
   if (profile.role === 'STUDENT') await purgeStudentData(client, profile);
@@ -772,8 +798,7 @@ async function deleteUser(client: DataClient, caller: Caller, args: { username: 
 
 async function updateUserContact(client: DataClient, caller: Caller, args: { username: string; email?: string | null; phone?: string | null }) {
   const user = parse(username, args.username);
-  const profile = await getProfileByUsername(client, user);
-  if (!profile) throw new HandlerError('User not found', 'NOT_FOUND');
+  const profile = await getSchoolProfile(client, caller, user);
   const attrs: { Name: string; Value: string }[] = [];
   if (args.email) {
     parse(z.email(), args.email);
@@ -808,7 +833,7 @@ async function assignStudents(
   let count = 0;
   await mapLimit(ids, 3, async (userId) => {
     const p = await client.models.Profile.get({ userId });
-    if (!p.data || p.data.role !== 'STUDENT') return;
+    if (!p.data || p.data.role !== 'STUDENT' || p.data.schoolId !== caller.schoolId) return;
     await applyStudentAssignment(
       client,
       p.data,
@@ -825,6 +850,8 @@ async function assignStudents(
 
 async function assignTeacher(client: DataClient, caller: Caller, args: { teacherId: string; classIds: (string | null)[] }) {
   const teacher = unwrap(await client.models.Profile.get({ userId: args.teacherId }), 'Profile.get');
+  if (!teacher) throw new HandlerError('Teacher not found', 'NOT_FOUND');
+  assertSameSchool(caller, teacher.schoolId, 'Teacher');
   if (teacher.role !== 'TEACHER') throw new HandlerError('Not a teacher', 'VALIDATION');
   const wanted = new Set(args.classIds.filter((x): x is string => !!x));
   const current = await listAll((nextToken) => client.models.Class.listClassesByTeacher({ teacherId: teacher.userId }, { limit: 100, nextToken }));
@@ -836,7 +863,7 @@ async function assignTeacher(client: DataClient, caller: Caller, args: { teacher
   }
   const names: string[] = [];
   for (const classId of wanted) {
-    const cls = await getClass(client, classId);
+    const cls = await getClass(client, classId, caller.schoolId);
     names.push(cls.name);
     if (cls.teacherId && cls.teacherId !== teacher.userId) {
       // previous teacher loses the class
@@ -869,11 +896,20 @@ async function assignTeacher(client: DataClient, caller: Caller, args: { teacher
 
 // ────────────────────────────── entry point ──────────────────────────────
 export const handler = async (event: AppSyncEvent<Record<string, unknown>>) => {
-  const caller = requireAdmin(event);
-  const client = await getDataClient(env);
   const args = event.arguments as never;
+  const op = opName(event);
   try {
-    switch (opName(event)) {
+    const identity = requireIdentity(event);
+    const client = await getDataClient(env);
+    const deps = { client, cognito, userPoolId: env.USER_POOL_ID };
+    // Account-level operations: available before the caller belongs to a school.
+    if (op === 'registerSchool') return await registerSchool(deps, identity, args);
+    if (op === 'syncMyAccess') return await syncMyAccess(deps, identity);
+
+    const caller = await resolveAdmin(client, identity);
+    switch (op) {
+      case 'saveSchoolProfile':
+        return await saveSchoolProfile(deps, caller, (args as { profile: unknown }).profile);
       case 'createStudent':
         return await createStudent(client, caller, args);
       case 'createTeacher':
@@ -896,7 +932,7 @@ export const handler = async (event: AppSyncEvent<Record<string, unknown>>) => {
       case 'assignTeacher':
         return await assignTeacher(client, caller, args);
       default:
-        throw new HandlerError(`Unknown operation ${opName(event)}`);
+        throw new HandlerError(`Unknown operation ${op}`);
     }
   } catch (e) {
     if (e instanceof HandlerError) throw new Error(`[${e.code}] ${e.message}`);

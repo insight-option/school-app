@@ -7,7 +7,7 @@ export function useClasses() {
   const session = useSession();
   return useQuery({
     queryKey: qk.classes(session.schoolId),
-    enabled: session.status === 'signedIn',
+    enabled: session.status === 'signedIn' && !!session.schoolId,
     staleTime: 60_000,
     queryFn: async () => listAll((nextToken) => client.models.Class.listClassesBySchool({ schoolId: session.schoolId }, { limit: 100, nextToken })),
   });
@@ -25,7 +25,7 @@ export function useBuses() {
   const session = useSession();
   return useQuery({
     queryKey: qk.buses(session.schoolId),
-    enabled: session.status === 'signedIn',
+    enabled: session.status === 'signedIn' && !!session.schoolId,
     staleTime: 60_000,
     queryFn: async () => listAll((nextToken) => client.models.Bus.listBusesBySchool({ schoolId: session.schoolId }, { limit: 100, nextToken })),
   });

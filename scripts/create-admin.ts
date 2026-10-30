@@ -34,6 +34,9 @@ async function main() {
     must(await client.models.SchoolSettings.create({ schoolId, name: outputs.custom?.schoolName ?? 'Our School' }), 'SchoolSettings.create');
     log('School settings created');
   }
+  // Creates the public directory listing (and repairs group / attribute state if needed).
+  const access = await client.mutations.syncMyAccess({});
+  log('Access synced', access.data ?? access.errors);
   console.log(`\nSign in with  ID: ${username}   password: ${password}\n`);
 }
 

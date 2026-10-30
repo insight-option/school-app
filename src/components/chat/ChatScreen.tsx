@@ -17,7 +17,8 @@ import { toast } from '../../ui/Toast';
 import { useSession } from '../../lib/auth/session';
 import { useMyProfile } from '../../features/profiles';
 import {
-  OFFICE_USER_ID,
+  isOfficeSeat,
+  officeSeatId,
   useConversation,
   useConversationMembers,
   useDeleteMessage,
@@ -46,7 +47,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
   const router = useRouter();
   const session = useSession();
   const me = useMyProfile();
-  const seatUserId = session.role === 'ADMIN' ? OFFICE_USER_ID : (session.userId ?? '');
+  const seatUserId = session.role === 'ADMIN' ? officeSeatId(session.schoolId) : (session.userId ?? '');
 
   const conversation = useConversation(conversationId);
   const members = useConversationMembers(conversationId);
@@ -284,15 +285,15 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
 
       <Sheet visible={showMembers} onClose={() => setShowMembers(false)} title={t('chat.members')}>
         {(members.data ?? [])
-          .filter((m) => m.userId !== OFFICE_USER_ID || session.role === 'ADMIN')
+          .filter((m) => !isOfficeSeat(m.userId) || session.role === 'ADMIN')
           .map((m) => (
             <ListItem
               key={m.userId}
-              title={m.userId === OFFICE_USER_ID ? t('chat.office') : (m.peerUserId ? m.title : m.title)}
+              title={isOfficeSeat(m.userId) ? t('chat.office') : m.title}
               subtitle={m.role ?? undefined}
               left={<Avatar name={m.title} avatarKey={m.avatarKey} size={36} />}
               onPress={
-                m.userId !== OFFICE_USER_ID && m.userId !== session.userId && session.role !== 'ADMIN'
+                !isOfficeSeat(m.userId) && m.userId !== session.userId && session.role !== 'ADMIN'
                   ? undefined
                   : undefined
               }

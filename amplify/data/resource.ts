@@ -5,14 +5,25 @@ import { alarm } from '../functions/alarm/resource';
 import { comms } from '../functions/comms/resource';
 
 /**
- * School system schema.
+ * School system schema – multi-school (multi-tenant).
+ *
+ * Tenancy (every school's data is isolated from every other school):
+ *  - Every record carries `schoolId`. Users carry the same id in the `custom:schoolId` Cognito
+ *    attribute, which only the backend can write (the app client's write attributes exclude it).
+ *  - MEMBER READ  `allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read'])`:
+ *    signed-in users read records of their own school. The app sends the ID token (which carries
+ *    custom attributes) to AppSync – see src/lib/amplify.ts.
+ *  - SCHOOL ADMIN `allow.groupDefinedIn('schoolId')`: each school has a Cognito group named after its
+ *    schoolId that contains only that school's office admins; they get full access to their school's
+ *    records and nothing else. The static ADMIN group is only used for routing and custom operations,
+ *    whose Lambdas scope every action to the caller's school.
+ *  - Public directory: `School` is readable by guests (identity pool) and every signed-in user;
+ *    applications are submitted through a guest-callable mutation and readable only by the school.
  *
  * Design rules (see PERFORMANCE.md):
- *  - every list access pattern has a secondary index; the client never calls a bare `list()` on a
- *    growing table;
+ *  - every list access pattern has a secondary index, partitioned by school where it spans users;
  *  - display fields (names, plates, class names) are denormalised onto child records;
- *  - STUDENT / TEACHER / DRIVER can read what they need and *create* only where the product says so;
- *    every other write goes through a Lambda-backed custom mutation that validates the caller;
+ *  - writes that need validation go through Lambda-backed custom mutations;
  *  - timestamps used as sort keys are explicit fields (`sentAt`, `postedAt`, …) because the
  *    auto-managed `createdAt` cannot be used as a GSI sort key.
  */
@@ -34,10 +45,85 @@ const schema = a
     FeedbackCategory: a.enum(['ACADEMIC', 'BEHAVIOR', 'ATTENDANCE', 'PRAISE', 'OTHER']),
     AuthorRole: a.enum(['TEACHER', 'ADMIN']),
     BroadcastAudience: a.enum(['ALL_TEACHERS', 'ALL_STUDENTS', 'ALL_DRIVERS', 'CLASS', 'BUS']),
-    NotificationType: a.enum(['ALARM', 'MESSAGE', 'FEEDBACK', 'BROADCAST', 'BUS_NEAR', 'BOARDED', 'DROPPED', 'SYSTEM']),
+    NotificationType: a.enum(['ALARM', 'MESSAGE', 'FEEDBACK', 'BROADCAST', 'BUS_NEAR', 'BOARDED', 'DROPPED', 'SYSTEM', 'APPLICATION']),
     ImportJobStatus: a.enum(['PENDING', 'RUNNING', 'COMPLETED', 'FAILED']),
+    GenderPolicy: a.enum(['MIXED', 'BOYS', 'GIRLS']),
+    ApplicationStatus: a.enum(['NEW', 'REVIEWING', 'ACCEPTED', 'WAITLISTED', 'REJECTED']),
 
     // ───────────────────────────── school ─────────────────────────────
+    /** Public directory listing – what parents see before signing in. Written by the school's admins. */
+    School: a
+      .model({
+        schoolId: a.id().required(),
+        name: a.string().required(),
+        nameLower: a.string().required(), // search + sort key
+        directory: a.string().required(), // 'PUBLIC' (listed) | 'HIDDEN' – never null (GSI key)
+        tagline: a.string(),
+        description: a.string(),
+        logoKey: a.string(),
+        coverKey: a.string(),
+        primaryColor: a.string(),
+        city: a.string(),
+        country: a.string(),
+        address: a.string(),
+        location: a.ref('Location'),
+        phone: a.string(),
+        email: a.string(),
+        website: a.string(),
+        curriculum: a.string(),
+        grades: a.string(), // display text, e.g. "KG1 – Grade 12"
+        gradeOptions: a.string().array(), // choices on the application form
+        languages: a.string(),
+        genderPolicy: a.ref('GenderPolicy'),
+        feesFrom: a.float(),
+        feesTo: a.float(),
+        currency: a.string(),
+        transportAvailable: a.boolean(),
+        foundedYear: a.integer(),
+        facilities: a.string().array(),
+        applicationsOpen: a.boolean(),
+        academicYear: a.string(),
+        applicationDeadline: a.string(), // YYYY-MM-DD
+        admissionsNote: a.string(),
+        requiredDocuments: a.string().array(),
+        seatsAvailable: a.integer(),
+      })
+      .identifier(['schoolId'])
+      .secondaryIndexes((index) => [index('directory').sortKeys(['nameLower']).queryField('listDirectorySchools')])
+      .authorization((allow) => [allow.guest().to(['read']), allow.authenticated().to(['read']), allow.groupDefinedIn('schoolId')]),
+
+    /** Online admission applications – submitted without an account, reviewed by the school office. */
+    Application: a
+      .model({
+        schoolId: a.string().required(),
+        reference: a.string().required(),
+        status: a.ref('ApplicationStatus').required(),
+        studentName: a.string().required(),
+        dateOfBirth: a.string(),
+        gender: a.string(),
+        gradeApplying: a.string(),
+        parentName: a.string().required(),
+        relationship: a.string(),
+        parentEmail: a.string().required(),
+        parentEmailLower: a.string().required(),
+        parentPhone: a.string().required(),
+        address: a.string(),
+        currentSchool: a.string(),
+        needsTransport: a.boolean(),
+        notes: a.string(),
+        language: a.string(),
+        reviewerNote: a.string(),
+        reviewedBy: a.string(),
+        reviewedAt: a.datetime(),
+        submittedAt: a.datetime().required(),
+      })
+      .secondaryIndexes((index) => [
+        index('schoolId').sortKeys(['submittedAt']).queryField('listApplicationsBySchool'),
+        index('reference').queryField('listApplicationsByReference'),
+        index('parentEmailLower').sortKeys(['submittedAt']).queryField('listApplicationsByEmail'),
+      ])
+      .authorization((allow) => [allow.groupDefinedIn('schoolId')]),
+
     SchoolSettings: a
       .model({
         schoolId: a.id().required(),
@@ -56,8 +142,7 @@ const schema = a
         senderEmail: a.string(),
       })
       .identifier(['schoolId'])
-      .authorization((allow) => [allow.authenticated().to(['read']), allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     // ───────────────────────────── people ─────────────────────────────
     Profile: a
       .model({
@@ -90,9 +175,9 @@ const schema = a
         index('busId').sortKeys(['fullName']).queryField('listProfilesByBus'),
         index('username').queryField('listProfilesByUsername'),
         index('schoolId').sortKeys(['fullName']).queryField('listProfilesBySchool'),
+        index('schoolId').sortKeys(['role']).queryField('listProfilesBySchoolAndRole'),
       ])
-      .authorization((allow) => [allow.authenticated().to(['read']), allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     Device: a
       .model({
         userId: a.id().required(),
@@ -105,8 +190,7 @@ const schema = a
         index('userId').queryField('listDevicesByUser'),
         index('expoPushToken').queryField('listDevicesByToken'),
       ])
-      .authorization((allow) => [allow.ownerDefinedIn('userId'), allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.ownerDefinedIn('userId')]),
     Class: a
       .model({
         schoolId: a.string().required(),
@@ -121,8 +205,7 @@ const schema = a
         index('schoolId').sortKeys(['name']).queryField('listClassesBySchool'),
         index('teacherId').queryField('listClassesByTeacher'),
       ])
-      .authorization((allow) => [allow.authenticated().to(['read']), allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     Bus: a
       .model({
         busId: a.id().required(), // = driver username
@@ -138,12 +221,12 @@ const schema = a
       })
       .identifier(['busId'])
       .secondaryIndexes((index) => [index('schoolId').sortKeys(['plate']).queryField('listBusesBySchool')])
-      .authorization((allow) => [allow.authenticated().to(['read']), allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     // One row per bus, updated in place by the driver device.
     BusLocation: a
       .model({
         busId: a.id().required(),
+        schoolId: a.string(), // optional only for rows written before multi-school support
         driverUserId: a.string().required(),
         lat: a.float().required(),
         lng: a.float().required(),
@@ -155,11 +238,10 @@ const schema = a
       })
       .identifier(['busId'])
       .authorization((allow) => [
-        allow.authenticated().to(['read']),
+        allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']),
         allow.ownerDefinedIn('driverUserId').to(['read', 'update']),
-        allow.group('ADMIN'),
+        allow.groupDefinedIn('schoolId'),
       ]),
-
     // ───────────────────────────── transport ─────────────────────────────
     StudentDayStatus: a
       .model({
@@ -178,13 +260,13 @@ const schema = a
       .secondaryIndexes((index) => [
         index('busId').sortKeys(['date']).queryField('listDayStatusByBusAndDate'),
         index('date').sortKeys(['status']).queryField('listDayStatusByDate'),
+        index('schoolId').sortKeys(['date']).queryField('listDayStatusBySchoolAndDate'),
       ])
       .authorization((allow) => [
         allow.ownerDefinedIn('ownerId').to(['create', 'update', 'read']),
-        allow.groups(['TEACHER', 'DRIVER']).to(['read']),
-        allow.group('ADMIN'),
+        allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']),
+        allow.groupDefinedIn('schoolId'),
       ]),
-
     Trip: a
       .model({
         busId: a.string().required(),
@@ -206,13 +288,14 @@ const schema = a
       .secondaryIndexes((index) => [
         index('busId').sortKeys(['date']).queryField('listTripsByBusAndDate'),
         index('date').sortKeys(['busId']).queryField('listTripsByDate'),
+        index('schoolId').sortKeys(['date']).queryField('listTripsBySchoolAndDate'),
       ])
-      .authorization((allow) => [allow.authenticated().to(['read']), allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     TripStop: a
       .model({
         tripId: a.id().required(),
         busId: a.string().required(),
+        schoolId: a.string(), // optional only for rows written before multi-school support
         date: a.string().required(),
         studentId: a.id().required(),
         studentName: a.string().required(),
@@ -236,8 +319,7 @@ const schema = a
         index('tripId').sortKeys(['order']).queryField('listStopsByTrip'),
         index('studentId').sortKeys(['date']).queryField('listStopsByStudentAndDate'),
       ])
-      .authorization((allow) => [allow.authenticated().to(['read']), allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     // ───────────────────────────── messaging ─────────────────────────────
     Conversation: a
       .model({
@@ -257,13 +339,13 @@ const schema = a
         index('classId').queryField('listConversationsByClass'),
         index('busId').queryField('listConversationsByBus'),
         index('type').sortKeys(['lastMessageAt']).queryField('listConversationsByType'),
+        index('schoolId').sortKeys(['lastMessageAt']).queryField('listConversationsBySchool'),
       ])
-      .authorization((allow) => [allow.authenticated().to(['read']), allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     ConversationMember: a
       .model({
         conversationId: a.id().required(),
-        userId: a.id().required(), // 'OFFICE' for the shared school-office seat
+        userId: a.id().required(), // the school-office seat is officeSeatId(schoolId)
         ownerId: a.string().required(), // = userId; owner auth cannot sit on the sort key
         schoolId: a.string().required(),
         role: a.string(),
@@ -282,8 +364,7 @@ const schema = a
       })
       .identifier(['conversationId', 'userId'])
       .secondaryIndexes((index) => [index('userId').sortKeys(['lastMessageAt']).queryField('listMembershipsByUser')])
-      .authorization((allow) => [allow.ownerDefinedIn('ownerId').to(['read', 'update']), allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.ownerDefinedIn('ownerId').to(['read', 'update']), allow.groupDefinedIn('schoolId')]),
     Message: a
       .model({
         conversationId: a.id().required(),
@@ -300,8 +381,7 @@ const schema = a
         deleted: a.boolean().default(false),
       })
       .secondaryIndexes((index) => [index('conversationId').sortKeys(['sentAt']).queryField('listMessagesByConversation')])
-      .authorization((allow) => [allow.authenticated().to(['read']), allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     MessageReport: a
       .model({
         schoolId: a.string().required(),
@@ -316,8 +396,7 @@ const schema = a
         resolved: a.boolean().default(false),
       })
       .secondaryIndexes((index) => [index('schoolId').sortKeys(['reportedAt']).queryField('listReportsBySchool')])
-      .authorization((allow) => [allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.groupDefinedIn('schoolId')]),
     // ───────────────────────────── feedback & broadcasts ─────────────────────────────
     Feedback: a
       .model({
@@ -343,11 +422,12 @@ const schema = a
         index('schoolId').sortKeys(['postedAt']).queryField('listFeedbackBySchool'),
       ])
       .authorization((allow) => [
+        // the student/parent sees feedback about them; teachers see what they wrote (other teachers'
+        // notes about a student come through the listStudentFeedback query, which checks the class)
         allow.ownerDefinedIn('studentId').to(['read']),
-        allow.group('TEACHER').to(['read']),
-        allow.group('ADMIN'),
+        allow.ownerDefinedIn('authorId').to(['read']),
+        allow.groupDefinedIn('schoolId'),
       ]),
-
     Broadcast: a
       .model({
         schoolId: a.string().required(),
@@ -368,8 +448,7 @@ const schema = a
         index('targetId').sortKeys(['postedAt']).queryField('listBroadcastsByTarget'),
         index('schoolId').sortKeys(['postedAt']).queryField('listBroadcastsBySchool'),
       ])
-      .authorization((allow) => [allow.authenticated().to(['read']), allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     Notification: a
       .model({
         userId: a.id().required(),
@@ -382,8 +461,7 @@ const schema = a
         sentAt: a.datetime().required(),
       })
       .secondaryIndexes((index) => [index('userId').sortKeys(['sentAt']).queryField('listNotificationsByUser')])
-      .authorization((allow) => [allow.ownerDefinedIn('userId').to(['read', 'update']), allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.ownerDefinedIn('userId').to(['read', 'update'])]),
     // ───────────────────────────── courses (content arrives later) ─────────────────────────────
     Course: a
       .model({
@@ -400,11 +478,11 @@ const schema = a
         index('schoolId').sortKeys(['title']).queryField('listCoursesBySchool'),
         index('classId').queryField('listCoursesByClass'),
       ])
-      .authorization((allow) => [allow.authenticated().to(['read']), allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     CourseLesson: a
       .model({
         courseId: a.id().required(),
+        schoolId: a.string(),
         title: a.string().required(),
         description: a.string(),
         videoKey: a.string(),
@@ -413,12 +491,12 @@ const schema = a
         published: a.boolean().default(false),
       })
       .secondaryIndexes((index) => [index('courseId').sortKeys(['order']).queryField('listLessonsByCourse')])
-      .authorization((allow) => [allow.authenticated().to(['read']), allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     CourseEnrollment: a
       .model({
         courseId: a.id().required(),
         studentId: a.id().required(),
+        schoolId: a.string(),
         progress: a.float().default(0),
         enrolledAt: a.datetime().required(),
       })
@@ -426,8 +504,7 @@ const schema = a
         index('studentId').queryField('listEnrollmentsByStudent'),
         index('courseId').queryField('listEnrollmentsByCourse'),
       ])
-      .authorization((allow) => [allow.ownerDefinedIn('studentId').to(['read', 'update']), allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.ownerDefinedIn('studentId').to(['read', 'update']), allow.groupDefinedIn('schoolId')]),
     // ───────────────────────────── ops ─────────────────────────────
     AuditLog: a
       .model({
@@ -446,8 +523,7 @@ const schema = a
         index('entityId').sortKeys(['occurredAt']).queryField('listAuditByEntity'),
         index('actorId').sortKeys(['occurredAt']).queryField('listAuditByActor'),
       ])
-      .authorization((allow) => [allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.groupDefinedIn('schoolId')]),
     ImportJob: a
       .model({
         adminId: a.string().required(),
@@ -464,8 +540,7 @@ const schema = a
         finishedAt: a.datetime(),
       })
       .secondaryIndexes((index) => [index('adminId').sortKeys(['startedAt']).queryField('listImportJobsByAdmin')])
-      .authorization((allow) => [allow.group('ADMIN')]),
-
+      .authorization((allow) => [allow.groupDefinedIn('schoolId')]),
     // ───────────────────────────── custom operation result types ─────────────────────────────
     CreateUserResult: a.customType({
       userId: a.string().required(),
@@ -487,6 +562,103 @@ const schema = a
     PlacesResult: a.customType({
       places: a.ref('PlaceResult').array(),
     }),
+    SchoolAccessResult: a.customType({
+      schoolId: a.string(),
+      role: a.string(),
+      changed: a.boolean().required(),
+    }),
+    ApplicationReceipt: a.customType({
+      reference: a.string().required(),
+      schoolName: a.string().required(),
+      submittedAt: a.string().required(),
+    }),
+    ApplicationStatusResult: a.customType({
+      reference: a.string().required(),
+      schoolId: a.string().required(),
+      schoolName: a.string().required(),
+      studentName: a.string().required(),
+      status: a.string().required(),
+      submittedAt: a.string().required(),
+      reviewedAt: a.string(),
+      message: a.string(),
+    }),
+    StudentFeedbackItem: a.customType({
+      id: a.string().required(),
+      studentId: a.string().required(),
+      studentName: a.string().required(),
+      className: a.string(),
+      authorId: a.string().required(),
+      authorName: a.string().required(),
+      authorRole: a.string().required(),
+      audience: a.string().required(),
+      category: a.string().required(),
+      rating: a.integer(),
+      title: a.string().required(),
+      body: a.string().required(),
+      attachmentKeys: a.string().array(),
+      postedAt: a.string().required(),
+    }),
+
+    // ───────────────────────────── schools: self-service sign-up & public profile (Lambda: admin-users) ─────────────────────────────
+    /** A signed-in account without a school creates one and becomes its first office admin (named
+     *  registerSchool because the School model already generates createSchool). */
+    registerSchool: a
+      .mutation()
+      .arguments({
+        name: a.string().required(),
+        adminName: a.string().required(),
+        phone: a.string(),
+        city: a.string(),
+        country: a.string(),
+        address: a.string(),
+        lat: a.float(),
+        lng: a.float(),
+        timezone: a.string(),
+        language: a.string(),
+        logoKey: a.string(),
+        profile: a.json(), // optional public profile fields (tagline, description, curriculum, …)
+      })
+      .returns(a.ref('SchoolAccessResult'))
+      .authorization((allow) => [allow.authenticated()])
+      .handler(a.handler.function(adminUsers)),
+
+    /** Repairs the caller's access after sign-in (school attribute, school-admin group, directory row). */
+    syncMyAccess: a
+      .mutation()
+      .arguments({ note: a.string() })
+      .returns(a.ref('SchoolAccessResult'))
+      .authorization((allow) => [allow.authenticated()])
+      .handler(a.handler.function(adminUsers)),
+
+    /** Validated save of the public directory profile (keeps SchoolSettings name/logo/location in sync). */
+    saveSchoolProfile: a
+      .mutation()
+      .arguments({ profile: a.json().required() })
+      .returns(a.ref('School'))
+      .authorization((allow) => [allow.group('ADMIN')])
+      .handler(a.handler.function(adminUsers)),
+
+    // ───────────────────────────── admissions (Lambda: comms) ─────────────────────────────
+    submitApplication: a
+      .mutation()
+      .arguments({ schoolId: a.string().required(), application: a.json().required() })
+      .returns(a.ref('ApplicationReceipt'))
+      .authorization((allow) => [allow.guest(), allow.authenticated()])
+      .handler(a.handler.function(comms)),
+
+    checkApplication: a
+      .query()
+      .arguments({ reference: a.string().required(), email: a.string().required() })
+      .returns(a.ref('ApplicationStatusResult'))
+      .authorization((allow) => [allow.guest(), allow.authenticated()])
+      .handler(a.handler.function(comms)),
+
+    reviewApplication: a
+      .mutation()
+      .arguments({ applicationId: a.string().required(), status: a.ref('ApplicationStatus').required(), note: a.string() })
+      .returns(a.ref('Application'))
+      .authorization((allow) => [allow.group('ADMIN')])
+      .handler(a.handler.function(comms)),
 
     // ───────────────────────────── admin user management (Lambda: admin-users) ─────────────────────────────
     createStudent: a
@@ -665,6 +837,14 @@ const schema = a
       .authorization((allow) => [allow.authenticated()])
       .handler(a.handler.function(alarm)),
 
+    /** "I'm coming" from the alarm notification on a phone that is signed out (token from the push). */
+    acknowledgeAlarmWithToken: a
+      .mutation()
+      .arguments({ tripStopId: a.string().required(), expires: a.integer().required(), token: a.string().required() })
+      .returns(a.ref('OkResult'))
+      .authorization((allow) => [allow.guest(), allow.authenticated()])
+      .handler(a.handler.function(alarm)),
+
     testAlarm: a
       .mutation()
       .arguments({ note: a.string() })
@@ -723,6 +903,14 @@ const schema = a
       .authorization((allow) => [allow.groups(['TEACHER', 'ADMIN'])])
       .handler(a.handler.function(comms)),
 
+    /** Feedback history of one student for the teachers of that student's class (and the office). */
+    listStudentFeedback: a
+      .query()
+      .arguments({ studentId: a.string().required() })
+      .returns(a.ref('StudentFeedbackItem').array())
+      .authorization((allow) => [allow.groups(['TEACHER', 'ADMIN'])])
+      .handler(a.handler.function(comms)),
+
     sendBroadcast: a
       .mutation()
       .arguments({ broadcastId: a.string().required() })
@@ -739,6 +927,14 @@ const schema = a
       })
       .returns(a.ref('OkResult'))
       .authorization((allow) => [allow.group('ADMIN')])
+      .handler(a.handler.function(comms)),
+
+    /** Registers this phone's push token for the caller and detaches it from anyone who used the phone before. */
+    registerDevice: a
+      .mutation()
+      .arguments({ expoPushToken: a.string().required(), platform: a.string().required(), deviceName: a.string() })
+      .returns(a.ref('OkResult'))
+      .authorization((allow) => [allow.authenticated()])
       .handler(a.handler.function(comms)),
 
     updateMyProfile: a

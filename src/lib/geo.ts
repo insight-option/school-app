@@ -59,10 +59,37 @@ export function nearestVertexIndex(p: LatLng, line: LatLng[]): number {
  * When the bus is far off the route (before a recompute) the whole line is kept.
  */
 export function remainingPath(p: LatLng, line: LatLng[], maxOffRouteMeters = 500): LatLng[] {
-  if (line.length < 2) return line;
+  return remainingPathFrom(p, line, maxOffRouteMeters).points;
+}
+
+/** Like remainingPath, also returning the index of the first original vertex still ahead (-1 = whole line). */
+export function remainingPathFrom(p: LatLng, line: LatLng[], maxOffRouteMeters = 500): { points: LatLng[]; startIndex: number } {
+  if (line.length < 2) return { points: line, startIndex: -1 };
   const i = nearestVertexIndex(p, line);
-  if (haversineMeters(p, line[i]) > maxOffRouteMeters) return line;
-  return [p, ...line.slice(i + 1)];
+  if (haversineMeters(p, line[i]) > maxOffRouteMeters) return { points: line, startIndex: -1 };
+  return { points: [p, ...line.slice(i + 1)], startIndex: i };
+}
+
+/** Congested stretch of the route polyline: [startIndex, endIndex, level] (1 = slow, 2 = jam). */
+export type TrafficSpan = [number, number, number];
+
+/**
+ * Traffic stretches still ahead of the bus. `startIndex` comes from remainingPathFrom; a span the bus is
+ * already inside starts at the bus position.
+ */
+export function trafficAhead(line: LatLng[], spans: readonly TrafficSpan[] | null | undefined, startIndex: number, bus: LatLng | null): { points: LatLng[]; level: number }[] {
+  const out: { points: LatLng[]; level: number }[] = [];
+  for (const span of spans ?? []) {
+    const [s, e, level] = span;
+    if (!Number.isInteger(s) || !Number.isInteger(e) || e <= s || e >= line.length || (level !== 1 && level !== 2)) continue;
+    if (startIndex >= 0 && e <= startIndex) continue; // already driven past
+    if (startIndex >= 0 && s <= startIndex) {
+      const pts = line.slice(startIndex + 1, e + 1);
+      if (bus) pts.unshift(bus);
+      if (pts.length > 1) out.push({ points: pts, level });
+    } else out.push({ points: line.slice(s, e + 1), level });
+  }
+  return out;
 }
 
 export function pathLengthMeters(line: LatLng[]): number {

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client, listAll, unwrap, type DayStatus, type StudentDayStatus } from '../lib/data/client';
 import { qk } from '../lib/query/client';
 import { expandAbsenceRange } from '../lib/rules/dayStatus';
+import { useSession } from '../lib/auth/session';
 
 export { LOCKED_STOP_STATUSES, canChangeDayStatus, expandAbsenceRange } from '../lib/rules/dayStatus';
 
@@ -47,11 +48,16 @@ export function useBusDayStatusSubscription(busId: string | null | undefined, da
 }
 
 export function useAbsencesOnDate(date: string, enabled = true) {
+  const session = useSession();
+  const schoolId = session.schoolId;
   return useQuery({
-    queryKey: qk.absencesByDate(date),
-    enabled,
+    queryKey: [...qk.absencesByDate(date), schoolId],
+    enabled: enabled && !!schoolId,
     staleTime: 30_000,
-    queryFn: async () => listAll((nextToken) => client.models.StudentDayStatus.listDayStatusByDate({ date, status: { eq: 'NOT_GOING' } }, { limit: 200, nextToken })),
+    queryFn: async () =>
+      (await listAll((nextToken) => client.models.StudentDayStatus.listDayStatusBySchoolAndDate({ schoolId, date: { eq: date } }, { limit: 200, nextToken }))).filter(
+        (s) => s.status === 'NOT_GOING',
+      ),
   });
 }
 

@@ -20,6 +20,7 @@ const ICONS: Record<NotificationType, keyof typeof Ionicons.glyphMap> = {
   BOARDED: 'checkmark-circle',
   DROPPED: 'home',
   SYSTEM: 'information-circle',
+  APPLICATION: 'document-text',
 };
 
 export default function NotificationsScreen() {

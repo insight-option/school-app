@@ -26,7 +26,7 @@ export function useSettings() {
   const schoolId = session.schoolId;
   return useQuery({
     queryKey: qk.settings(schoolId),
-    enabled: session.status === 'signedIn',
+    enabled: session.status === 'signedIn' && !!schoolId,
     staleTime: 60_000,
     queryFn: async () => {
       const res = await client.models.SchoolSettings.get({ schoolId });
@@ -44,7 +44,7 @@ export function useSettingsSubscription() {
   const qc = useQueryClient();
   const session = useSession();
   const schoolId = session.schoolId;
-  const enabled = session.status === 'signedIn';
+  const enabled = session.status === 'signedIn' && !!schoolId;
   useEffect(() => {
     if (!enabled) return;
     const sub = client.models.SchoolSettings.onUpdate({ filter: { schoolId: { eq: schoolId } } }).subscribe({

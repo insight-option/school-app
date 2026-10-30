@@ -1,6 +1,9 @@
 import type { TranslationKeys } from './en';
 
+import { arSchools } from './ar.schools';
+
 export const ar: TranslationKeys = {
+  ...arSchools,
   common: {
     appName: 'حافلة المدرسة',
     ok: 'حسنًا',
@@ -70,6 +73,7 @@ export const ar: TranslationKeys = {
     notFound: 'غير موجود',
     emptyList: 'لا يوجد شيء هنا بعد',
     requiredField: 'هذا الحقل مطلوب',
+    fixErrors: 'يرجى تصحيح الحقول المظللة.',
     invalidEmail: 'أدخل بريدًا إلكترونيًا صحيحًا',
     invalidPhone: 'أدخل رقم هاتف بالصيغة الدولية، مثل ‎+9665…',
     minChars: '{{count}} أحرف على الأقل',
@@ -128,8 +132,8 @@ export const ar: TranslationKeys = {
   roles: { ADMIN: 'إدارة المدرسة', TEACHER: 'معلم', DRIVER: 'سائق الحافلة', STUDENT: 'طالب / ولي أمر' },
   auth: {
     signInTitle: 'مرحبًا بعودتك',
-    signInSubtitle: 'سجّل الدخول بالرقم التعريفي المدرسي وكلمة المرور التي استلمتها من الإدارة.',
-    schoolId: 'الرقم التعريفي المدرسي',
+    signInSubtitle: 'سجّل الدخول بالرقم المدرسي وكلمة المرور التي استلمتها من المكتب، أو بالبريد الذي سجّلت به مدرستك.',
+    schoolId: 'الرقم المدرسي أو البريد',
     schoolIdPlaceholder: 'مثال: S-10234',
     password: 'كلمة المرور',
     signIn: 'تسجيل الدخول',
@@ -167,6 +171,9 @@ export const ar: TranslationKeys = {
       codeExpired: 'انتهت صلاحية الرمز. اطلب رمزًا جديدًا.',
       tooMany: 'محاولات كثيرة. يرجى الانتظار قليلًا.',
       alreadySignedIn: 'أنت مسجّل الدخول بالفعل.',
+      accountExists: 'يوجد حساب بهذا البريد بالفعل. سجّل الدخول بدلًا من ذلك.',
+      notConfirmed: 'أكّد بريدك أولًا – أدخل الرمز الذي أرسلناه إليك.',
+      invalidEmail: 'أدخل بريدًا إلكترونيًا صحيحًا.',
     },
   },
   onboarding: {
@@ -201,6 +208,8 @@ export const ar: TranslationKeys = {
     settings: 'الإعدادات',
     audit: 'سجل التدقيق',
     notifications: 'الإشعارات',
+    applications: 'طلبات القبول',
+    schoolProfile: 'الملف العام',
   },
   student: {
     tripState: {
@@ -548,6 +557,7 @@ export const ar: TranslationKeys = {
       BOARDED: 'صعد',
       DROPPED: 'نزل',
       SYSTEM: 'النظام',
+      APPLICATION: 'طلب قبول',
     },
     permissionBlocked: 'الإشعارات محظورة. فعّلها من إعدادات النظام لاستقبال منبّه الحافلة.',
     permissionOk: 'الإشعارات مفعّلة على هذا الجهاز.',

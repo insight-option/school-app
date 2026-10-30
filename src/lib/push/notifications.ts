@@ -10,7 +10,12 @@ export const MESSAGES_CHANNEL_ID = 'messages';
 export const DEFAULT_CHANNEL_ID = 'default';
 
 export type PushData = {
-  type?: 'ALARM' | 'TEST_ALARM' | 'MESSAGE' | 'FEEDBACK' | 'BROADCAST' | 'BUS_NEAR' | 'BOARDED' | 'DROPPED' | 'SYSTEM';
+  type?: 'ALARM' | 'TEST_ALARM' | 'MESSAGE' | 'FEEDBACK' | 'BROADCAST' | 'BUS_NEAR' | 'BOARDED' | 'DROPPED' | 'SYSTEM' | 'APPLICATION';
+  applicationId?: string;
+  studentName?: string;
+  /** Signed "I'm coming" token for answering an alarm while signed out (see alarm Lambda). */
+  ackToken?: string;
+  ackExpires?: number;
   tripStopId?: string;
   tripId?: string;
   busId?: string;
@@ -119,15 +124,10 @@ export async function registerDeviceForPush(userId: string): Promise<string | nu
     return null;
   }
   kv.setString(KV_KEYS.pushToken, token);
-  const now = new Date().toISOString();
   const name = `${Device.manufacturer ?? ''} ${Device.modelName ?? ''}`.trim() || Platform.OS;
   try {
-    const existing = await client.models.Device.listDevicesByToken({ expoPushToken: token }, { limit: 5 });
-    unwrap(existing);
-    const mine = existing.data.find((d) => d.userId === userId);
-    for (const d of existing.data) if (d.userId !== userId) await client.models.Device.delete({ id: d.id }); // device changed hands
-    if (mine) await client.models.Device.update({ id: mine.id, lastSeenAt: now, platform: Platform.OS, deviceName: name });
-    else await client.models.Device.create({ userId, expoPushToken: token, platform: Platform.OS, deviceName: name, lastSeenAt: now });
+    // Server-side so a phone that changed hands stops receiving the previous user's alarms.
+    unwrap(await client.mutations.registerDevice({ expoPushToken: token, platform: Platform.OS, deviceName: name }), 'device');
   } catch (e) {
     console.warn('device registration failed', e);
   }
@@ -168,6 +168,8 @@ export function routeForPush(data: PushData | undefined, role: string | null): s
     case 'BOARDED':
     case 'DROPPED':
       return role === 'STUDENT' ? '/(student)/bus' : '/notifications';
+    case 'APPLICATION':
+      return role === 'ADMIN' ? (data.applicationId ? `/(admin)/applications/${data.applicationId}` : '/(admin)/applications') : '/notifications';
     case 'BROADCAST':
     case 'SYSTEM':
     default:

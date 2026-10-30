@@ -6,11 +6,18 @@ import { useSession } from '../lib/auth/session';
 
 // ───────────────────────────── feedback ─────────────────────────────
 export function useFeedbackForStudent(studentId: string | null | undefined, parentOnly = false) {
+  const session = useSession();
+  const asTeacher = session.role === 'TEACHER';
   return useQuery({
-    queryKey: [...qk.feedbackByStudent(studentId ?? ''), parentOnly],
+    queryKey: [...qk.feedbackByStudent(studentId ?? ''), parentOnly, asTeacher],
     enabled: !!studentId,
     staleTime: 30_000,
-    queryFn: async () => {
+    queryFn: async (): Promise<Feedback[]> => {
+      if (asTeacher) {
+        // Teachers see the whole history of students in their classes (checked server-side).
+        const items = unwrap(await client.queries.listStudentFeedback({ studentId: studentId! }), 'feedback') ?? [];
+        return items.filter((f): f is NonNullable<typeof f> => !!f) as unknown as Feedback[];
+      }
       const rows = await listAll((nextToken) => client.models.Feedback.listFeedbackByStudent({ studentId: studentId! }, { limit: 50, nextToken, sortDirection: 'DESC' }));
       return parentOnly ? rows.filter((f) => f.audience !== 'OFFICE') : rows;
     },
@@ -74,18 +81,20 @@ export function useBroadcastsForMe(profile: { role: string; classId?: string | n
   const session = useSession();
   const role = profile?.role ?? session.role ?? '';
   const audience: BroadcastAudience | null = role === 'STUDENT' ? 'ALL_STUDENTS' : role === 'TEACHER' ? 'ALL_TEACHERS' : role === 'DRIVER' ? 'ALL_DRIVERS' : null;
-  const scope = `${audience}-${profile?.classId ?? ''}-${profile?.busId ?? ''}`;
+  const scope = `${session.schoolId}-${audience}-${profile?.classId ?? ''}-${profile?.busId ?? ''}`;
   return useQuery({
     queryKey: qk.broadcasts(scope),
-    enabled: !!audience,
+    enabled: !!audience && !!session.schoolId,
     staleTime: 60_000,
-    queryFn: async () => {
-      const tasks: Promise<Broadcast[]>[] = [listAll((nextToken) => client.models.Broadcast.listBroadcastsByAudience({ audience: audience! }, { limit: 50, nextToken, sortDirection: 'DESC' }))];
-      if (profile?.classId) tasks.push(listAll((nextToken) => client.models.Broadcast.listBroadcastsByTarget({ targetId: profile.classId! }, { limit: 50, nextToken, sortDirection: 'DESC' })));
-      if (profile?.busId) tasks.push(listAll((nextToken) => client.models.Broadcast.listBroadcastsByTarget({ targetId: profile.busId! }, { limit: 50, nextToken, sortDirection: 'DESC' })));
-      const all = (await Promise.all(tasks)).flat();
-      const seen = new Set<string>();
-      return all.filter((b) => (seen.has(b.id) ? false : (seen.add(b.id), true))).sort((a, b) => b.postedAt.localeCompare(a.postedAt));
+    queryFn: async (): Promise<Broadcast[]> => {
+      // School-scoped, newest first; keep what is addressed to everyone in my role, my class or my bus.
+      const rows = await listAll((nextToken) => client.models.Broadcast.listBroadcastsBySchool({ schoolId: session.schoolId }, { limit: 100, nextToken, sortDirection: 'DESC' }), 5);
+      return rows.filter(
+        (b) =>
+          b.audience === audience ||
+          (b.audience === 'CLASS' && !!profile?.classId && b.targetId === profile.classId) ||
+          (b.audience === 'BUS' && !!profile?.busId && b.targetId === profile.busId),
+      );
     },
   });
 }

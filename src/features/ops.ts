@@ -55,10 +55,13 @@ export function useDeleteCourse() {
 
 export function useSaveLesson() {
   const qc = useQueryClient();
+  const session = useSession();
   return useMutation({
     mutationFn: async (input: Partial<CourseLesson> & { courseId: string; title: string; order: number }) => {
       const { createdAt: _c, updatedAt: _u, ...rest } = input as CourseLesson;
-      const saved = rest.id ? unwrap(await client.models.CourseLesson.update(rest), 'lesson') : unwrap(await client.models.CourseLesson.create({ ...rest, published: rest.published ?? false }), 'lesson');
+      const saved = rest.id
+        ? unwrap(await client.models.CourseLesson.update(rest), 'lesson')
+        : unwrap(await client.models.CourseLesson.create({ ...rest, schoolId: session.schoolId, published: rest.published ?? false }), 'lesson');
       if (!rest.id) {
         const course = await client.models.Course.get({ id: input.courseId });
         if (course.data) await client.models.Course.update({ id: input.courseId, lessonCount: (course.data.lessonCount ?? 0) + 1 });

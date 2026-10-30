@@ -8,18 +8,20 @@ import { HomeLocationPicker } from '../../components/map/HomeLocationPicker';
 import { MapView } from '../../components/map/MapView';
 import { DEFAULT_SETTINGS, useSaveSettings, useSettings } from '../../features/settings';
 import { pickFromLibrary, uploadAttachment } from '../../components/chat/attachments';
-import { useSignedUrl } from '../../lib/storage/s3';
+import { myIdentityId, useSignedUrl } from '../../lib/storage/s3';
+import { useSaveSchoolProfile } from '../../features/admissions';
+import { TIMEZONES } from '../../lib/timezones';
 import { SES_FROM_EMAIL } from '../../lib/amplify';
 import type { LatLng } from '../../lib/geo';
 
 const COLORS = ['#2563EB', '#0891B2', '#16A34A', '#7C3AED', '#DB2777', '#EA580C', '#0F766E', '#4F46E5'];
-const TIMEZONES = ['Asia/Riyadh', 'Asia/Dubai', 'Asia/Kuwait', 'Asia/Qatar', 'Asia/Bahrain', 'Asia/Muscat', 'Asia/Amman', 'Africa/Cairo', 'Europe/London', 'UTC'];
 
 export default function AdminSettings() {
   const { t } = useTranslation();
   const theme = useTheme();
   const settings = useSettings();
   const save = useSaveSettings();
+  const saveProfile = useSaveSchoolProfile();
   const logo = useSignedUrl(settings.data?.logoKey);
   // Edits are stored as a sparse patch on top of the loaded settings (no effect needed to "hydrate").
   const [patch, setPatch] = useState<Partial<typeof DEFAULT_SETTINGS>>({});
@@ -46,7 +48,23 @@ export default function AdminSettings() {
         alarmMaxRepeats: Math.max(0, Math.min(20, Number(form.alarmMaxRepeats) || 5)),
         senderEmail: SES_FROM_EMAIL || null,
       },
-      { onSuccess: () => toast.success(t('common.success')), onError: (e) => toast.error(e.message) },
+      {
+        onSuccess: () => {
+          toast.success(t('common.success'));
+          // Keep the public directory listing in step with the operational settings.
+          saveProfile.mutate(
+            {
+              name: form.name.trim() || DEFAULT_SETTINGS.name,
+              address: form.address ?? '',
+              primaryColor: form.primaryColor ?? '',
+              lat: location?.lat ?? null,
+              lng: location?.lng ?? null,
+            },
+            { onError: (e) => toast.error(e.message) },
+          );
+        },
+        onError: (e) => toast.error(e.message),
+      },
     );
   };
 
@@ -54,8 +72,10 @@ export default function AdminSettings() {
     const picked = await pickFromLibrary('images');
     if (!picked?.[0]) return;
     try {
-      const { key } = await uploadAttachment(picked[0], 'school/branding');
-      await save.mutateAsync({ logoKey: key, name: form.name || DEFAULT_SETTINGS.name });
+      // school-media/<identity>/… is writable only by this account and readable in the public directory;
+      // saving through the public profile also updates SchoolSettings.logoKey.
+      const { key } = await uploadAttachment(picked[0], `school-media/${await myIdentityId()}`);
+      await saveProfile.mutateAsync({ logoKey: key });
       toast.success(t('common.success'));
     } catch (e) {
       toast.error((e as Error).message);

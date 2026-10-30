@@ -16,6 +16,7 @@ import {
   AdminGetUserCommand,
   AdminSetUserPasswordCommand,
   CognitoIdentityProviderClient,
+  CreateGroupCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 import type { Schema } from '../amplify/data/resource';
 
@@ -36,7 +37,21 @@ export function loadOutputs(): Outputs {
   }
   console.log(`▸ Using ${path}`);
   const outputs = JSON.parse(readFileSync(path, 'utf8')) as Outputs;
-  Amplify.configure(outputs as never);
+  // Same as the app: GraphQL calls carry the ID token (school-isolation rules read custom:schoolId).
+  Amplify.configure(outputs as never, {
+    API: {
+      GraphQL: {
+        headers: async () => {
+          try {
+            const idToken = (await fetchAuthSession()).tokens?.idToken?.toString();
+            return idToken ? { Authorization: idToken } : {};
+          } catch {
+            return {};
+          }
+        },
+      },
+    },
+  });
   return outputs;
 }
 
@@ -49,9 +64,18 @@ export async function ensureCognitoUser(
 ): Promise<{ sub: string; created: boolean }> {
   const client = cognito(outputs.auth.aws_region);
   const UserPoolId = outputs.auth.user_pool_id;
+  // Office admins also belong to their school's admin group (named after the schoolId).
+  const ensureSchoolGroup = async () => {
+    if (input.group !== 'ADMIN') return;
+    await client.send(new CreateGroupCommand({ UserPoolId, GroupName: input.schoolId, Description: 'School office admins' })).catch((e: { name?: string }) => {
+      if (e.name !== 'GroupExistsException') throw e;
+    });
+    await client.send(new AdminAddUserToGroupCommand({ UserPoolId, Username: input.username, GroupName: input.schoolId }));
+  };
   try {
     const existing = await client.send(new AdminGetUserCommand({ UserPoolId, Username: input.username }));
     const sub = existing.UserAttributes?.find((a) => a.Name === 'sub')?.Value ?? '';
+    await ensureSchoolGroup();
     return { sub, created: false };
   } catch (e) {
     if ((e as { name?: string }).name !== 'UserNotFoundException') throw e;
@@ -73,6 +97,7 @@ export async function ensureCognitoUser(
   );
   await client.send(new AdminSetUserPasswordCommand({ UserPoolId, Username: input.username, Password: input.password, Permanent: true }));
   await client.send(new AdminAddUserToGroupCommand({ UserPoolId, Username: input.username, GroupName: input.group }));
+  await ensureSchoolGroup();
   return { sub: res.User?.Attributes?.find((a) => a.Name === 'sub')?.Value ?? '', created: true };
 }
 

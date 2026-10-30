@@ -1,5 +1,5 @@
 import { defineBackend } from '@aws-amplify/backend';
-import { ArnFormat, Duration, Names, Stack } from 'aws-cdk-lib';
+import { ArnFormat, Duration, Fn, Names, Stack } from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
@@ -38,8 +38,32 @@ cfnUserPool.addPropertyOverride('Policies.PasswordPolicy', {
   RequireSymbols: false,
   TemporaryPasswordValidityDays: 30,
 });
-// Only the office creates accounts – no self sign-up.
-cfnUserPool.addPropertyOverride('AdminCreateUserConfig.AllowAdminCreateUserOnly', true);
+// Schools sign themselves up ("Create my school"): self sign-up is on. Teachers, drivers and students
+// are still created by their school's office through the admin-users Lambda.
+cfnUserPool.addPropertyOverride('AdminCreateUserConfig.AllowAdminCreateUserOnly', false);
+// The API trusts `custom:schoolId` / `custom:role` (school isolation, see data/resource.ts), so the app
+// client may read them but never write them – only the backend (admin APIs) sets them.
+const STANDARD_ATTRIBUTES = [
+  'address',
+  'birthdate',
+  'email',
+  'family_name',
+  'gender',
+  'given_name',
+  'locale',
+  'middle_name',
+  'name',
+  'nickname',
+  'phone_number',
+  'picture',
+  'preferred_username',
+  'profile',
+  'updated_at',
+  'website',
+  'zoneinfo',
+];
+cfnUserPoolClient.readAttributes = [...STANDARD_ATTRIBUTES, 'email_verified', 'phone_number_verified', 'custom:role', 'custom:schoolId'];
+cfnUserPoolClient.writeAttributes = STANDARD_ATTRIBUTES;
 // SRP for real builds; USER_PASSWORD_AUTH lets Expo Go (no Amplify native module) sign in during previews.
 cfnUserPoolClient.explicitAuthFlows = ['ALLOW_USER_SRP_AUTH', 'ALLOW_USER_PASSWORD_AUTH', 'ALLOW_CUSTOM_AUTH', 'ALLOW_REFRESH_TOKEN_AUTH'];
 // Keep tokens short-lived but refresh for a long time so parents stay signed in.
@@ -67,6 +91,11 @@ backend.adminUsers.resources.lambda.addToRolePolicy(
       'cognito-idp:AdminGetUser',
       'cognito-idp:AdminUpdateUserAttributes',
       'cognito-idp:ListUsers',
+      // per-school admin groups (school isolation) – created by registerSchool / syncMyAccess
+      'cognito-idp:CreateGroup',
+      'cognito-idp:DeleteGroup', // rollback of a failed registerSchool
+      'cognito-idp:GetGroup',
+      'cognito-idp:AdminListGroupsForUser',
     ],
     resources: [userPool.userPoolArn],
   }),
@@ -109,12 +138,35 @@ const alarmStateMachineArn = alarmStack.formatArn({
   arnFormat: ArnFormat.COLON_RESOURCE_NAME,
 });
 backend.alarm.addEnvironment('ALARM_STATE_MACHINE_ARN', alarmStateMachineArn);
+// HMAC key for the "I'm coming" token carried by alarm pushes (acknowledge while signed out). The
+// stack id is stable across deploys and never exposed to clients.
+backend.alarm.addEnvironment('ALARM_ACK_SECRET', Fn.join('|', [alarmStack.stackId, 'alarm-ack-v1']));
 backend.alarm.resources.lambda.addToRolePolicy(
   new iam.PolicyStatement({
     actions: ['states:StartExecution'],
     resources: [alarmStateMachineArn],
   }),
 );
+
+// ───────────────────────────── storage: identity-scoped writes for group roles ─────────────────────────────
+// Signed-in users receive their Cognito group's IAM role, which Amplify's `allow.entity` storage rules do
+// not cover. Grant each group role write/delete on its own identity folder only (never other people's).
+// The policies live in the storage stack (which already depends on auth) to avoid an auth ⇄ storage cycle.
+const bucket = backend.storage.resources.bucket;
+const storageStack = Stack.of(bucket);
+const ownFolder = (prefix: string) => bucket.arnForObjects(`${prefix}/\${cognito-identity.amazonaws.com:sub}/*`);
+for (const [groupName, group] of Object.entries(backend.auth.resources.groups)) {
+  const prefixes = groupName === 'ADMIN' ? ['avatars', 'school-media', 'imports'] : ['avatars'];
+  new iam.Policy(storageStack, `OwnFolderWrites${groupName}`, {
+    roles: [group.role],
+    statements: [
+      new iam.PolicyStatement({
+        actions: ['s3:PutObject', 's3:DeleteObject', 's3:AbortMultipartUpload'],
+        resources: prefixes.map(ownFolder),
+      }),
+    ],
+  });
+}
 
 // ───────────────────────────── outputs ─────────────────────────────
 backend.addOutput({

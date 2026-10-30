@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
 import { Button, Input, Screen, Select, Sheet, Text, useTheme } from '../../../ui';
@@ -31,7 +31,18 @@ export default function AdminNewStudent() {
   const buses = useBuses();
   const settings = useSettings();
   const create = useCreateStudent();
-  const [form, setForm] = useState({ username: '', password: generatePassword(), parentEmail: '', fullName: '', parentPhone: '', homeAddress: '', classId: '', busId: '' });
+  // Prefilled when the office creates the account from an accepted online application.
+  const prefill = useLocalSearchParams<{ fullName?: string; parentEmail?: string; parentPhone?: string; homeAddress?: string }>();
+  const [form, setForm] = useState({
+    username: '',
+    password: generatePassword(),
+    parentEmail: String(prefill.parentEmail ?? ''),
+    fullName: String(prefill.fullName ?? ''),
+    parentPhone: String(prefill.parentPhone ?? ''),
+    homeAddress: String(prefill.homeAddress ?? ''),
+    classId: '',
+    busId: '',
+  });
   const [home, setHome] = useState<LatLng | null>(null);
   const [pickHome, setPickHome] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});

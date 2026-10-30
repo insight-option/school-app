@@ -52,6 +52,10 @@ export type ActiveAlarm = {
   driverName?: string;
   plate?: string;
   etaSeconds?: number | null;
+  studentName?: string;
+  /** Signed token from the push: lets a signed-out phone answer "I'm coming". */
+  ackToken?: string;
+  ackExpires?: number;
   startedAt: number;
 };
 

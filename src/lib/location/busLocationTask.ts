@@ -17,9 +17,10 @@ export const getActiveTrip = () => kv.getJSON<ActiveTrip>(KV_KEYS.activeTrip) ??
 export const getLastSample = () => kv.getJSON<GpsSample>('driver.lastSample') ?? null;
 
 /** The signed-in driver's bus – lets the foreground watcher publish the bus position before a trip starts. */
-export function setDriverBusId(busId: string | null) {
+export function setDriverBusId(busId: string | null, schoolId?: string | null) {
   if (busId) kv.setString(KV_KEYS.driverBusId, busId);
   else kv.delete(KV_KEYS.driverBusId);
+  if (schoolId) kv.setString(KV_KEYS.driverSchoolId, schoolId);
 }
 
 export function toGpsSample(loc: Location.LocationObject): GpsSample {
@@ -59,7 +60,16 @@ export async function handleLocationSample(loc: Location.LocationObject): Promis
   const last = kv.getJSON<LastPublish>(KV_KEYS.lastBusPublish) ?? null;
   if (!shouldPublish(sample, last)) return false;
   try {
-    await publishBusLocation({ busId, lat: sample.lat, lng: sample.lng, heading: sample.heading, speed: sample.speed, accuracy: sample.accuracy, tripId: trip?.tripId });
+    await publishBusLocation({
+      busId,
+      schoolId: kv.getString(KV_KEYS.driverSchoolId) ?? null,
+      lat: sample.lat,
+      lng: sample.lng,
+      heading: sample.heading,
+      speed: sample.speed,
+      accuracy: sample.accuracy,
+      tripId: trip?.tripId,
+    });
     kv.setJSON(KV_KEYS.lastBusPublish, { ts: Date.now(), lat: sample.lat, lng: sample.lng });
     return true;
   } catch (e) {

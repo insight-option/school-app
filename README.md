@@ -1,23 +1,50 @@
-# School Bus – transport & communication system
+# School Bus – multi-school transport & communication platform
 
-One Expo app (Android · iOS · Web) with four workspaces – **Parent/Student**, **Bus driver**,
-**Teacher**, **School office** – on an AWS Amplify Gen 2 backend (Cognito, AppSync/DynamoDB, S3,
-Lambda, Step Functions). Live bus tracking, optimised pickup routes on Google Maps, a loud
-driver→student alarm, real-time chat with voice/photo/video/files, feedback, broadcasts, and a
-"My Courses" section ready for content.
+One Expo app (Android · iOS · Web) on an AWS Amplify Gen 2 backend (Cognito, AppSync/DynamoDB, S3,
+Lambda, Step Functions). Anyone can browse the **public school directory** and apply online without an
+account; schools **create their own workspace** ("Create my school") and run four workspaces –
+**School office**, **Teacher**, **Bus driver**, **Parent/Student** – with live bus tracking, traffic-aware
+pickup routes on Google Maps, a loud driver→student alarm, real-time chat with voice/photo/video/files,
+feedback, broadcasts, online admissions and a "My Courses" section ready for content.
 
 ```
 school-app/
 ├─ amplify/                 backend (auth, data schema, storage, 4 Lambdas, CDK overrides)
-├─ src/app/                 expo-router routes: (auth) (student) (driver) (teacher) (admin) + shared chat/alarm
+├─ src/app/                 expo-router routes: public directory (index, schools/…, application-status),
+│                           (auth) incl. sign-up/verify, onboarding/school, (student) (driver) (teacher) (admin), chat, alarm
 ├─ src/features/            TanStack Query hooks per domain (profiles, trips, messaging, …)
 ├─ src/components/          map (native + web), chat, driver, admin, feedback, …
 ├─ src/lib/                 amplify, auth session, i18n (en/ar), push, alarm, location task, storage, rules
 ├─ src/ui/                  design system (theme tokens, Button, Input, Card, Sheet, Toast, …)
 ├─ scripts/                 seed.ts, create-admin.ts, smoke.ts, wipe.ts
-├─ __tests__/               unit tests (routing/chunking, auth routing, day status, alarm, throttle)
+├─ __tests__/               unit tests (routing + traffic, multi-school helpers, directory search, applications,
+│                           alarm token, auth routing, day status, alarm, throttle, remaining route)
 └─ README.md · SEED.md · PERFORMANCE.md
 ```
+
+## 0. Multi-school model (read this first)
+
+| Who | How they get in | What they see |
+|---|---|---|
+| Anyone (no account) | Opens the app | Public directory: search/filter schools, school pages, **apply online** (if the school accepts applications), check an application with reference + e-mail |
+| School owner | **Create my school** → name, e-mail, password → 6-digit e-mail code → set-up wizard (name, logo, location, profile, admissions) | The school-office workspace of the new school |
+| Office staff, teachers, drivers, families | Accounts created by their school's office (or the CSV import) | Their workspace, only their own school's data |
+
+**Isolation** (amplify/data/resource.ts, amplify/storage/resource.ts):
+
+- Every record carries `schoolId`; every user carries `custom:schoolId`, which only the backend can
+  write (the app client's write attributes exclude custom attributes).
+- Member reads: `ownerDefinedIn('schoolId').identityClaim('custom:schoolId')` – the app sends the
+  **ID token** to AppSync (src/lib/amplify.ts) because only the ID token carries custom attributes.
+- Office admins: each school has a Cognito group named after its `schoolId` (created by
+  `registerSchool`); `groupDefinedIn('schoolId')` gives its members full access to that school's
+  records only. The static `ADMIN` group is used for routing and for custom operations, whose Lambdas
+  re-check that every target belongs to the caller's school (`shared/caller.ts`).
+- Storage: no `list` permission anywhere; keys contain 128-bit random ids. Directory media lives in
+  `school-media/<identity id>/` (writable only by its uploader, readable by guests).
+- The first school (`default`) is migrated automatically: on the office admin's first sign-in the app
+  calls `syncMyAccess`, which creates the `default` admin group, adds the admin and creates the
+  school's directory listing.
 
 ## 1. Prerequisites
 
@@ -179,6 +206,17 @@ In sandbox Cognito uses its default sender (max **50 e-mails/day**). For product
   "Recompute", > 300 m off the polyline for > 60 s, and every 5 minutes while active. The Lambda
   rate-limits to one Google call per trip per 30 s.
 
+### Driver map
+
+Opening the Trip tab starts live GPS tracking immediately (the bus position is published before a trip
+starts). **Start trip** sends the driver's live fix; the route is optimised from there through every
+pending student and – for morning pickups – ends at the school. Google's per-stretch speed readings
+(`TRAFFIC_ON_POLYLINE`) colour slow (amber) and jammed (red) parts of the route; the live traffic layer
+is on by default. Controls: full screen (hides tab bar and status bar), navigation camera (heading-up,
+tilted), traffic on/off, map/satellite/hybrid, whole-route view. The next-stop card shows distance,
+ETA and a call button; the bottom bar shows the distance and time left, arrival time and pickups.
+Routes refresh every 5 minutes and when the bus leaves the route for a minute.
+
 ## 7. Push notifications & the alarm
 
 1. `npx eas-cli init` → put the project id in `EXPO_PUBLIC_EAS_PROJECT_ID`.
@@ -221,6 +259,20 @@ The alarm (driver → student) has all layers:
   driver's sheet flips instantly via subscription) and **Call driver**.
 - "Test alarm" in the parent Profile sends a real push to the user's own devices and opens the
   alarm screen.
+
+### Alarm when the app is closed or signed out
+
+- Devices stay registered when someone signs out, so the alarm keeps ringing on that phone; when a
+  different person signs in on the phone, `registerDevice` moves the phone to the new account (the
+  previous user stops receiving pushes there).
+- Alarm pushes carry a signed, 2-hour "I'm coming" token, so a signed-out phone can still open the
+  full-screen alarm and answer the driver (`acknowledgeAlarmWithToken`).
+- The family workspace asks for notification permission on first open and shows a red banner on the
+  Bus tab while notifications are off.
+- Limits outside the code: Android needs FCM credentials (step 2 above) and a rebuilt APK; iOS plays
+  the custom alarm sound and "time-sensitive" level only in a real build (Expo Go uses the default
+  sound); iOS silent mode mutes normal notifications – only Apple's Critical Alerts entitlement can
+  override it.
 
 ### Alarm over the lock screen (Android)
 

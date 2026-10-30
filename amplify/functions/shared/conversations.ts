@@ -1,8 +1,9 @@
 import type { Schema } from '../../data/resource';
 import type { DataClient } from './data';
 import { listAll, nowIso } from './data';
+import { officeSeatId } from './tenancy';
 
-export const OFFICE_USER_ID = 'OFFICE';
+export { officeSeatId, isOfficeSeat } from './tenancy';
 export const classConversationId = (classId: string) => `class_${classId}`;
 export const busConversationId = (busId: string) => `bus_${busId}`;
 export const officeConversationId = (userId: string) => `office_${userId}`;
@@ -128,11 +129,11 @@ export async function ensureOfficeConversation(
     title: 'School Office',
     subtitle: null,
     role: user.role,
-    peerUserId: OFFICE_USER_ID,
+    peerUserId: officeSeatId(user.schoolId),
   });
   await upsertMember(client, {
     conversationId: id,
-    userId: OFFICE_USER_ID,
+    userId: officeSeatId(user.schoolId),
     schoolId: user.schoolId,
     conversationType: 'OFFICE',
     title: user.fullName,
@@ -149,7 +150,7 @@ export async function ensureClassGroup(client: DataClient, cls: { id: string; na
   const conv = await ensureConversation(client, { id, schoolId: cls.schoolId, type: 'CLASS_GROUP', title: cls.name, classId: cls.id });
   await upsertMember(client, {
     conversationId: id,
-    userId: OFFICE_USER_ID,
+    userId: officeSeatId(cls.schoolId),
     schoolId: cls.schoolId,
     conversationType: 'CLASS_GROUP',
     title: cls.name,
@@ -165,7 +166,7 @@ export async function ensureBusGroup(client: DataClient, bus: { busId: string; p
   const conv = await ensureConversation(client, { id, schoolId: bus.schoolId, type: 'BUS_GROUP', title, busId: bus.busId });
   await upsertMember(client, {
     conversationId: id,
-    userId: OFFICE_USER_ID,
+    userId: officeSeatId(bus.schoolId),
     schoolId: bus.schoolId,
     conversationType: 'BUS_GROUP',
     title,

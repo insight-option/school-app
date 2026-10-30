@@ -1,4 +1,7 @@
+import { enSchools } from './en.schools';
+
 export const en = {
+  ...enSchools,
   common: {
     appName: 'School Bus',
     ok: 'OK',
@@ -68,6 +71,7 @@ export const en = {
     notFound: 'Not found',
     emptyList: 'Nothing here yet',
     requiredField: 'This field is required',
+    fixErrors: 'Please fix the highlighted fields.',
     invalidEmail: 'Enter a valid e-mail address',
     invalidPhone: 'Enter a phone number in international format, e.g. +9665…',
     minChars: 'At least {{count}} characters',
@@ -126,8 +130,8 @@ export const en = {
   roles: { ADMIN: 'School office', TEACHER: 'Teacher', DRIVER: 'Bus driver', STUDENT: 'Student / Parent' },
   auth: {
     signInTitle: 'Welcome back',
-    signInSubtitle: 'Sign in with the school ID and password you received from the office.',
-    schoolId: 'School ID',
+    signInSubtitle: 'Sign in with the school ID and password you received from the office, or with the e-mail you registered your school with.',
+    schoolId: 'School ID or e-mail',
     schoolIdPlaceholder: 'e.g. S-10234',
     password: 'Password',
     signIn: 'Sign in',
@@ -165,6 +169,9 @@ export const en = {
       codeExpired: 'The code expired. Request a new one.',
       tooMany: 'Too many attempts. Please wait a moment.',
       alreadySignedIn: 'You are already signed in.',
+      accountExists: 'An account with this e-mail already exists. Sign in instead.',
+      notConfirmed: 'Verify your e-mail first – enter the code we sent you.',
+      invalidEmail: 'Enter a valid e-mail address.',
     },
   },
   onboarding: {
@@ -199,6 +206,8 @@ export const en = {
     settings: 'Settings',
     audit: 'Audit log',
     notifications: 'Notifications',
+    applications: 'Applications',
+    schoolProfile: 'Public profile',
   },
   student: {
     tripState: {
@@ -546,6 +555,7 @@ export const en = {
       BOARDED: 'Boarded',
       DROPPED: 'Dropped off',
       SYSTEM: 'System',
+      APPLICATION: 'Application',
     },
     permissionBlocked: 'Notifications are blocked. Enable them in system settings to receive the bus alarm.',
     permissionOk: 'Notifications are enabled on this device.',

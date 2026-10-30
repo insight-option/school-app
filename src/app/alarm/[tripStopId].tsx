@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button, Text, useTheme } from '../../ui';
 import { toast } from '../../ui/Toast';
-import { client, unwrap } from '../../lib/data/client';
+import { client, publicClient, unwrap } from '../../lib/data/client';
 import { qk } from '../../lib/query/client';
 import { useAcknowledgeAlarm, useTripSubscriptions } from '../../features/trips';
 import { useBus } from '../../features/school';
@@ -35,23 +35,31 @@ export default function AlarmScreen() {
   const active = useAlarmStore((s) => s.active);
   const ack = useAcknowledgeAlarm();
   const [ackedLocally, setAckedLocally] = useState(false);
+  const [tokenAckFailed, setTokenAckFailed] = useState(false);
+  const [tokenAckBusy, setTokenAckBusy] = useState(false);
+  // Signed-out phone: everything comes from the push payload; "I'm coming" uses its signed token.
+  const signedOut = session.status !== 'signedIn';
+  const live = !isTest && !signedOut;
 
   const stop = useQuery({
     queryKey: ['alarmStop', id],
-    enabled: !isTest,
+    enabled: live,
     refetchInterval: 5000,
     queryFn: async () => unwrap(await client.models.TripStop.get({ id }), 'stop'),
   });
-  useTripSubscriptions(stop.data?.tripId, !isTest);
+  useTripSubscriptions(stop.data?.tripId, live);
   const trip = useQuery({
     queryKey: qk.trip(stop.data?.tripId ?? ''),
-    enabled: !!stop.data?.tripId,
+    enabled: live && !!stop.data?.tripId,
     queryFn: async () => unwrap(await client.models.Trip.get({ id: stop.data!.tripId }), 'trip'),
   });
-  const bus = useBus(stop.data?.busId ?? null);
+  const bus = useBus(live ? (stop.data?.busId ?? null) : null);
 
-  const uiState = useMemo(() => (isTest ? (ackedLocally ? 'acknowledged' : 'ringing') : alarmUiState(stop.data?.status, ackedLocally)), [isTest, stop.data?.status, ackedLocally]);
-  const ringing = shouldRing(uiState) || (!isTest && stop.isLoading && !ackedLocally);
+  const uiState = useMemo(
+    () => (isTest || signedOut ? (ackedLocally ? 'acknowledged' : 'ringing') : alarmUiState(stop.data?.status, ackedLocally)),
+    [isTest, signedOut, stop.data?.status, ackedLocally],
+  );
+  const ringing = shouldRing(uiState) || (live && stop.isLoading && !ackedLocally);
 
   useEffect(() => {
     if (ringing) void startAlarm();
@@ -69,15 +77,34 @@ export default function AlarmScreen() {
     stopAlarm();
     dismissStore();
     if (router.canGoBack()) router.back();
-    else router.replace(homeRouteForRole(session.role) as never);
+    else router.replace((signedOut ? '/' : homeRouteForRole(session.role)) as never);
   };
 
-  const onComing = () => {
+  const onComing = async () => {
     haptic('success');
-    setAckedLocally(true);
     stopAlarm();
-    if (isTest) return;
-    ack.mutate(id, { onError: (e) => toast.error(e.message) });
+    if (isTest) {
+      setAckedLocally(true);
+      return;
+    }
+    if (!signedOut) {
+      setAckedLocally(true);
+      ack.mutate(id, { onError: (e) => toast.error(e.message) });
+      return;
+    }
+    if (!active?.ackToken || !active.ackExpires) {
+      setTokenAckFailed(true);
+      return;
+    }
+    setTokenAckBusy(true);
+    try {
+      unwrap(await publicClient.mutations.acknowledgeAlarmWithToken({ tripStopId: id, expires: active.ackExpires, token: active.ackToken }), 'alarm');
+      setAckedLocally(true);
+    } catch {
+      setTokenAckFailed(true);
+    } finally {
+      setTokenAckBusy(false);
+    }
   };
 
   const driverName = trip.data?.driverName ?? active?.driverName ?? bus.data?.driverName ?? '';
@@ -107,8 +134,18 @@ export default function AlarmScreen() {
       </View>
 
       <View style={styles.actions}>
-        {uiState === 'ringing' || (isTest && !ackedLocally) ? (
-          <Button title={t('alarm.coming')} size="xl" variant="secondary" icon="walk" fullWidth onPress={onComing} loading={ack.isPending} style={{ backgroundColor: '#fff' }} />
+        {signedOut && !isTest ? (
+          <View style={styles.notice}>
+            <Ionicons name={tokenAckFailed ? 'alert-circle' : 'person-circle-outline'} size={18} color="#fff" />
+            <Text style={[styles.white, { flex: 1 }]} variant="caption">
+              {tokenAckFailed ? t('alarmOut.expired') : t('alarmOut.signedOut')}
+            </Text>
+          </View>
+        ) : null}
+        {(uiState === 'ringing' || (isTest && !ackedLocally)) && !tokenAckFailed ? (
+          <Button title={t('alarm.coming')} size="xl" variant="secondary" icon="walk" fullWidth onPress={() => void onComing()} loading={ack.isPending || tokenAckBusy} style={{ backgroundColor: '#fff' }} />
+        ) : tokenAckFailed ? (
+          <Button title={t('alarmOut.signIn')} size="xl" variant="secondary" icon="log-in-outline" fullWidth onPress={() => { stopAlarm(); dismissStore(); router.replace('/(auth)/sign-in' as never); }} style={{ backgroundColor: '#fff' }} />
         ) : (
           <Button title={t('common.close')} size="xl" variant="secondary" fullWidth onPress={leave} style={{ backgroundColor: '#fff' }} />
         )}
@@ -139,4 +176,5 @@ const styles = StyleSheet.create({
   info: { gap: 12, backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: 16, padding: 16 },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   actions: { gap: 12 },
+  notice: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(0,0,0,0.18)', borderRadius: 12, padding: 10 },
 });

@@ -57,8 +57,15 @@ export function requireIdentity(event: AppSyncEvent<unknown>) {
     isTeacher: groups.includes('TEACHER'),
     isDriver: groups.includes('DRIVER'),
     isStudent: groups.includes('STUDENT'),
-    schoolId: (event.identity.claims?.['custom:schoolId'] as string | undefined) ?? 'default',
+    // From the ID token when the app sends it; '' when absent. Handlers that act on school data call
+    // resolveCaller() (shared/caller.ts), which takes the school from the caller's profile instead.
+    schoolId: typeof event.identity.claims?.['custom:schoolId'] === 'string' ? (event.identity.claims['custom:schoolId'] as string) : '',
   };
+}
+
+/** True for identity-pool (guest or IAM) callers – used by the guest-callable operations. */
+export function isIamCaller(event: AppSyncEvent<unknown>): boolean {
+  return !event.identity || !(event.identity as { sub?: string }).sub;
 }
 
 export type Caller = ReturnType<typeof requireIdentity>;

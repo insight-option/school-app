@@ -3,8 +3,15 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { client, listAll, unwrap, type ConversationMember, type Message, type MessageType } from '../lib/data/client';
 import { qk } from '../lib/query/client';
 import { useSession } from '../lib/auth/session';
+import { isOfficeSeat, officeSeatId } from '../../amplify/functions/shared/tenancy';
 
-export const OFFICE_USER_ID = 'OFFICE';
+export { isOfficeSeat, officeSeatId };
+
+/** The shared "School office" chat seat of the signed-in admin's school. */
+export function useOfficeSeat(): string {
+  const session = useSession();
+  return officeSeatId(session.schoolId);
+}
 
 /** Inbox = this user's membership rows (denormalised titles, unread counts, last message). */
 export function useInbox(seatUserId: string | null | undefined) {
@@ -218,16 +225,15 @@ export function useDeleteMessage() {
 
 /** Office view: all class & bus group conversations (admin oversight). */
 export function useGroupConversations(enabled: boolean) {
+  const session = useSession();
+  const schoolId = session.schoolId;
   return useQuery({
-    queryKey: qk.groupConversations(),
-    enabled,
+    queryKey: [...qk.groupConversations(), schoolId],
+    enabled: enabled && !!schoolId,
     staleTime: 30_000,
     queryFn: async () => {
-      const [cls, bus] = await Promise.all([
-        listAll((nextToken) => client.models.Conversation.listConversationsByType({ type: 'CLASS_GROUP' }, { limit: 100, nextToken, sortDirection: 'DESC' })),
-        listAll((nextToken) => client.models.Conversation.listConversationsByType({ type: 'BUS_GROUP' }, { limit: 100, nextToken, sortDirection: 'DESC' })),
-      ]);
-      return [...cls, ...bus].sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
+      const rows = await listAll((nextToken) => client.models.Conversation.listConversationsBySchool({ schoolId }, { limit: 200, nextToken, sortDirection: 'DESC' }));
+      return rows.filter((c) => c.type === 'CLASS_GROUP' || c.type === 'BUS_GROUP');
     },
   });
 }

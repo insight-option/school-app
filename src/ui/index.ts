@@ -12,3 +12,5 @@ export * from './EmptyState';
 export * from './Toast';
 export * from './Screen';
 export * from './misc';
+export * from './Gradient';
+export * from './PressableScale';

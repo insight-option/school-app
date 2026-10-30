@@ -8,7 +8,7 @@ import { previewLabel, useInbox, useInboxSubscription } from '../../features/mes
 import type { ConversationMember } from '../../lib/data/client';
 import { timeAgoShort } from '../../lib/util/format';
 
-/** Conversation inbox for any seat (a user id or 'OFFICE'). */
+/** Conversation inbox for any seat (a user id or the school's office seat). */
 export function InboxList({ seatUserId, header, emptyTitle, emptyBody }: { seatUserId: string | null | undefined; header?: React.ReactNode; emptyTitle?: string; emptyBody?: string }) {
   const { t } = useTranslation();
   const theme = useTheme();

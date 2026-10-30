@@ -1,7 +1,8 @@
 /**
  * Wipes a deployment back to an empty school. Every table row, every Cognito account and every
  * media object is removed, except:
- *   - SchoolSettings and the branding files under `school/` (edit them in Office → Settings),
+ *   - SchoolSettings and the directory listing (School) of every school that keeps an account,
+ *     plus branding/directory media under `school/` and `school-media/`,
  *   - the accounts listed in KEEP_USERS (default `ADMIN-01,T-1001,BUS-01`), which are reset:
  *     no class, no bus, no avatar, active. A kept DRIVER keeps its (emptied) bus, live-position
  *     row and bus group chat; every other conversation is removed.
@@ -18,10 +19,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DescribeTableCommand, DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb';
 import { BatchWriteCommand, DynamoDBDocumentClient, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import { AdminDeleteUserCommand, CognitoIdentityProviderClient, ListUsersCommand } from '@aws-sdk/client-cognito-identity-provider';
+import { AdminDeleteUserCommand, CognitoIdentityProviderClient, DeleteGroupCommand, ListGroupsCommand, ListUsersCommand } from '@aws-sdk/client-cognito-identity-provider';
+import { isOfficeSeat, officeSeatId } from '../amplify/functions/shared/tenancy';
 import { DeleteObjectsCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 
 const MODELS = [
+  'School',
+  'Application',
   'SchoolSettings',
   'Profile',
   'Device',
@@ -46,8 +50,8 @@ const MODELS = [
 ] as const;
 
 type Item = Record<string, unknown>;
-const OFFICE = 'OFFICE';
-const KEEP_PREFIXES = ['school/'];
+// Branding (legacy) and public directory media (logos/covers of kept schools) survive a wipe.
+const KEEP_PREFIXES = ['school/', 'school-media/'];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -188,11 +192,14 @@ async function main() {
       .map((p) => String(p.busId)),
   );
   const keptConversationIds = new Set([...keptBusIds].map((b) => `bus_${b}`));
+  // Schools that still have a kept account keep their settings and directory listing.
+  const keptSchoolIds = new Set(keptProfiles.map((p) => String(p.schoolId)));
 
   const keepRow = (model: string, it: Item): boolean => {
     switch (model) {
       case 'SchoolSettings':
-        return true;
+      case 'School':
+        return keptSchoolIds.has(String(it.schoolId));
       case 'Profile':
         return keptUserIds.has(String(it.userId));
       case 'Bus':
@@ -201,7 +208,7 @@ async function main() {
       case 'Conversation':
         return keptConversationIds.has(String(it.id));
       case 'ConversationMember':
-        return keptConversationIds.has(String(it.conversationId)) && (keptUserIds.has(String(it.userId)) || it.userId === OFFICE);
+        return keptConversationIds.has(String(it.conversationId)) && (keptUserIds.has(String(it.userId)) || isOfficeSeat(String(it.userId)));
       default:
         return false;
     }
@@ -212,7 +219,11 @@ async function main() {
   const keptMembersByConversation = new Map<string, number>();
   for (const model of MODELS) {
     const name = table(model);
-    const desc = await ddb.send(new DescribeTableCommand({ TableName: name }));
+    const desc = await ddb.send(new DescribeTableCommand({ TableName: name })).catch((e: { name?: string }) => {
+      if (e.name === 'ResourceNotFoundException') return null; // table added by a newer deployment
+      throw e;
+    });
+    if (!desc) continue;
     const keyAttrs = (desc.Table?.KeySchema ?? []).map((k) => k.AttributeName!);
     const items = await scanAll(doc, name);
     const doomed = items.filter((it) => !keepRow(model, it));
@@ -261,7 +272,7 @@ async function main() {
         ExpressionAttributeValues: { ':m': keptMembersByConversation.get(id) ?? 0, ':now': now },
       }),
     );
-    for (const userId of [...keptUserIds, OFFICE]) {
+    for (const userId of [...keptUserIds, ...[...keptSchoolIds].map((s) => officeSeatId(s))]) {
       await doc
         .send(
           new UpdateCommand({
@@ -277,6 +288,21 @@ async function main() {
         });
     }
   }
+
+  // ── 4b. Admin groups of removed schools (named sch-…) ─────────────────────────
+  let groupsDeleted = 0;
+  let groupToken: string | undefined;
+  do {
+    const res = await cognito.send(new ListGroupsCommand({ UserPoolId: outputs.auth.user_pool_id, Limit: 60, NextToken: groupToken }));
+    for (const g of res.Groups ?? []) {
+      const gn = g.GroupName ?? '';
+      if (/^sch-[a-z0-9]{10}$/.test(gn) && !keptSchoolIds.has(gn)) {
+        await cognito.send(new DeleteGroupCommand({ UserPoolId: outputs.auth.user_pool_id, GroupName: gn })).catch(() => undefined);
+        groupsDeleted++;
+      }
+    }
+    groupToken = res.NextToken;
+  } while (groupToken);
 
   // ── 5. Media ──────────────────────────────────────────────────────────────────
   let objectsDeleted = 0;
@@ -297,6 +323,7 @@ async function main() {
   console.log('\n▸ Tables');
   for (const row of summary) console.log(`  ${row.table.padEnd(20)} deleted ${String(row.deleted).padStart(5)}   kept ${row.kept}`);
   console.log(`▸ Media objects deleted: ${objectsDeleted} (kept prefixes: ${KEEP_PREFIXES.join(', ')})`);
+  console.log(`▸ School admin groups deleted: ${groupsDeleted}`);
   console.log(`▸ Remaining accounts: ${keptProfiles.map((p) => `${p.username} (${p.role})`).join(', ') || '(none)'}`);
   if (keptBusIds.size) console.log(`▸ Remaining buses: ${[...keptBusIds].join(', ')} (no students, no trips)`);
   console.log('\nDone. Sign in to the office and create classes, buses, teachers and students from scratch.');

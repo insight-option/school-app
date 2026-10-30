@@ -12,6 +12,9 @@ export type RoutableStop = { id: string; location: LatLng };
 
 export type PlannedStop = { id: string; order: number; etaSeconds: number; distanceMeters: number };
 
+/** Congested stretch of a polyline: [startIndex, endIndex, level] with level 1 = slow, 2 = traffic jam. */
+export type TrafficSpan = [number, number, 1 | 2];
+
 export type RoutePlan = {
   polyline: string;
   distanceMeters: number;
@@ -22,9 +25,11 @@ export type RoutePlan = {
   optimized: boolean;
   computedAt: string;
   warnings: string[];
+  /** Live traffic along `polyline` (indices into the decoded polyline). Empty without Google data. */
+  traffic: TrafficSpan[];
 };
 
-export type RouteLeg = { distanceMeters: number; durationSeconds: number; polyline: LatLng[] };
+export type RouteLeg = { distanceMeters: number; durationSeconds: number; polyline: LatLng[]; traffic?: TrafficSpan[] };
 export type ApiRoute = { legs: RouteLeg[]; optimizedOrder?: number[] };
 export type RouteApi = (req: { origin: LatLng; destination: LatLng; intermediates: LatLng[]; optimize: boolean }) => Promise<ApiRoute>;
 
@@ -43,6 +48,8 @@ export function googleRoutesApi(apiKey: string, fetchImpl: typeof fetch = fetch)
       routingPreference: optimize ? 'TRAFFIC_AWARE' : 'TRAFFIC_AWARE_OPTIMAL',
       departureTime: new Date(Date.now() + 10_000).toISOString(),
       optimizeWaypointOrder: optimize && intermediates.length > 1,
+      // Per-stretch speed readings (normal / slow / jam) so the driver map can colour congestion.
+      extraComputations: ['TRAFFIC_ON_POLYLINE'],
       polylineQuality: 'HIGH_QUALITY',
       languageCode: 'en',
       units: 'METRIC',
@@ -53,14 +60,19 @@ export function googleRoutesApi(apiKey: string, fetchImpl: typeof fetch = fetch)
         'content-type': 'application/json',
         'X-Goog-Api-Key': apiKey,
         'X-Goog-FieldMask':
-          'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs.duration,routes.legs.distanceMeters,routes.legs.polyline.encodedPolyline,routes.optimizedIntermediateWaypointIndex',
+          'routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs.duration,routes.legs.distanceMeters,routes.legs.polyline.encodedPolyline,routes.legs.travelAdvisory.speedReadingIntervals,routes.optimizedIntermediateWaypointIndex',
       },
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`Routes API ${res.status}: ${(await res.text()).slice(0, 500)}`);
     const json = (await res.json()) as {
       routes?: {
-        legs?: { duration?: string; distanceMeters?: number; polyline?: { encodedPolyline?: string } }[];
+        legs?: {
+          duration?: string;
+          distanceMeters?: number;
+          polyline?: { encodedPolyline?: string };
+          travelAdvisory?: { speedReadingIntervals?: { startPolylinePointIndex?: number; endPolylinePointIndex?: number; speed?: string }[] };
+        }[];
         optimizedIntermediateWaypointIndex?: number[];
       }[];
     };
@@ -71,10 +83,23 @@ export function googleRoutesApi(apiKey: string, fetchImpl: typeof fetch = fetch)
         distanceMeters: l.distanceMeters ?? 0,
         durationSeconds: parseInt((l.duration ?? '0s').replace('s', ''), 10) || 0,
         polyline: l.polyline?.encodedPolyline ? decodePolyline(l.polyline.encodedPolyline) : [],
+        traffic: speedSpans(l.travelAdvisory?.speedReadingIntervals),
       })),
       optimizedOrder: route.optimizedIntermediateWaypointIndex,
     };
   };
+}
+
+/** Google speed readings → congested spans (proto3 omits index 0, hence the defaults). */
+export function speedSpans(intervals: { startPolylinePointIndex?: number; endPolylinePointIndex?: number; speed?: string }[] | undefined): TrafficSpan[] {
+  const out: TrafficSpan[] = [];
+  for (const iv of intervals ?? []) {
+    const level = iv.speed === 'TRAFFIC_JAM' ? 2 : iv.speed === 'SLOW' ? 1 : 0;
+    const start = iv.startPolylinePointIndex ?? 0;
+    const end = iv.endPolylinePointIndex ?? start;
+    if (level && end > start) out.push([start, end, level]);
+  }
+  return out;
 }
 
 /** Straight-line fallback used when there is no API key or the API fails. */
@@ -118,12 +143,14 @@ export async function planRoute(
 
   if (!stops.length) {
     if (!input.finalDestination) {
-      return { polyline: '', distanceMeters: 0, durationSeconds: 0, stops: [], source: 'FALLBACK', chunks: 0, optimized: input.optimize, computedAt, warnings };
+      return { polyline: '', distanceMeters: 0, durationSeconds: 0, stops: [], source: 'FALLBACK', chunks: 0, optimized: input.optimize, computedAt, warnings, traffic: [] };
     }
     const r = await safeApi(api, { origin: input.origin, destination: input.finalDestination, intermediates: [], optimize: false }, warnings);
     const total = r.route.legs.reduce((acc, l) => ({ d: acc.d + l.distanceMeters, t: acc.t + l.durationSeconds }), { d: 0, t: 0 });
+    const direct = new PolylineBuilder();
+    r.route.legs.forEach((l) => direct.addLeg(l));
     return {
-      polyline: encodePolyline(r.route.legs.flatMap((l) => l.polyline)),
+      polyline: encodePolyline(direct.points),
       distanceMeters: total.d,
       durationSeconds: total.t,
       stops: [],
@@ -132,6 +159,7 @@ export async function planRoute(
       optimized: false,
       computedAt,
       warnings,
+      traffic: direct.traffic(),
     };
   }
 
@@ -141,7 +169,7 @@ export async function planRoute(
   if (chunks.length > 1) warnings.push(`${stops.length} stops exceed the ${chunkSize}-waypoint limit; routed as ${chunks.length} chained chunks`);
 
   const planned: PlannedStop[] = [];
-  const coords: LatLng[] = [];
+  const line = new PolylineBuilder();
   let cumulativeSeconds = 0;
   let cumulativeMeters = 0;
   let cursor = input.origin;
@@ -175,7 +203,7 @@ export async function planRoute(
     r.route.legs.forEach((leg, li) => {
       cumulativeSeconds += leg.durationSeconds;
       cumulativeMeters += leg.distanceMeters;
-      coords.push(...leg.polyline);
+      line.addLeg(leg);
       const stop = seq[li];
       if (stop) planned.push({ id: stop.id, order: order++, etaSeconds: cumulativeSeconds, distanceMeters: cumulativeMeters });
     });
@@ -191,7 +219,7 @@ export async function planRoute(
   }
 
   return {
-    polyline: encodePolyline(dedupe(coords)),
+    polyline: encodePolyline(line.points),
     distanceMeters: Math.round(cumulativeMeters),
     durationSeconds: Math.round(cumulativeSeconds),
     stops: planned,
@@ -200,7 +228,42 @@ export async function planRoute(
     optimized: input.optimize,
     computedAt,
     warnings,
+    traffic: line.traffic(),
   };
+}
+
+/**
+ * Concatenates leg polylines (dropping the duplicated junction points) and re-bases each leg's traffic
+ * spans onto the indices of the combined line; overlapping spans of the same level are merged.
+ */
+export class PolylineBuilder {
+  readonly points: LatLng[] = [];
+  private spans: TrafficSpan[] = [];
+
+  addLeg(leg: RouteLeg) {
+    const map: number[] = [];
+    for (const p of leg.polyline) {
+      const last = this.points[this.points.length - 1];
+      if (!last || Math.abs(last.lat - p.lat) > 1e-6 || Math.abs(last.lng - p.lng) > 1e-6) this.points.push(p);
+      map.push(this.points.length - 1);
+    }
+    for (const [start, end, level] of leg.traffic ?? []) {
+      const s = map[Math.min(start, map.length - 1)];
+      const e = map[Math.min(end, map.length - 1)];
+      if (s !== undefined && e !== undefined && e > s) this.spans.push([s, e, level]);
+    }
+  }
+
+  traffic(): TrafficSpan[] {
+    const sorted = [...this.spans].sort((a, b) => a[0] - b[0]);
+    const out: TrafficSpan[] = [];
+    for (const span of sorted) {
+      const prev = out[out.length - 1];
+      if (prev && prev[2] === span[2] && span[0] <= prev[1]) prev[1] = Math.max(prev[1], span[1]);
+      else out.push([span[0], span[1], span[2]]);
+    }
+    return out;
+  }
 }
 
 async function safeApi(api: RouteApi, req: Parameters<RouteApi>[0], warnings: string[]): Promise<{ route: ApiRoute; source: RoutePlan['source'] }> {
@@ -229,13 +292,4 @@ function farthest(from: LatLng, stops: RoutableStop[]): RoutableStop {
     }
   }
   return best;
-}
-
-function dedupe(points: LatLng[]): LatLng[] {
-  const out: LatLng[] = [];
-  for (const p of points) {
-    const last = out[out.length - 1];
-    if (!last || Math.abs(last.lat - p.lat) > 1e-6 || Math.abs(last.lng - p.lng) > 1e-6) out.push(p);
-  }
-  return out;
 }

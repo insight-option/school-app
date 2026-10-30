@@ -155,3 +155,40 @@ Still outside the code: Firebase project + FCM key upload + a new APK (user), Ap
 builds/APNs and Critical Alerts, and Expo Go's own limits (default notification sound, Apple Maps,
 no background location). Expo Go over the ngrok tunnel is a development bundle and is several times
 slower than the published update or the APK; performance should be judged on those.
+
+## Multi-school platform, public directory, admissions, premium driver map (2026-10-30)
+
+**Expo SDK 58.** The local upgrade (expo 58, React Native 0.88.1, React 19.3, expo-router 58) was
+finished: the half-converted lockfile (still pinning expo-router/@expo/ui 57) was regenerated and a
+clean `npm ci` validated; React Navigation 8 tab-bar API changes fixed. Expo Go on iOS now only
+supports SDK 58, which is why the previous build stopped opening.
+
+**What was added**
+
+| Area | Result |
+|---|---|
+| Landing | Public school directory for signed-out users: instant search (Arabic/Latin normalised), filters (applications open, bus service, curriculum), premium cards, cached for instant start; **Sign in** and **Create my school** always visible |
+| School page | Cover, logo, facts grid, admissions (status, deadline, documents), facilities, map + directions, contact actions, sticky **Apply now** |
+| Online applications | Guest form with saved draft and validation; reference number; status lookup by reference + e-mail; abuse limits (5 per e-mail per day, 40 per school per 10 min, duplicate detection) |
+| Create my school | Sign-up (e-mail + password) → 6-digit e-mail code → wizard (name, logo, location, timezone/language, profile & admissions) → office workspace |
+| Office | **Applications** (live list, status filters, decision + message to the family, "Create student account" prefilled) and **Public profile** editor (visibility, logo/cover, about, contact, location, academics, fees, admissions) |
+| Isolation | School-scoped auth rules on every model, per-school admin groups, Lambda checks on every operation, school-partitioned indexes, per-school office chat seat, storage without listing, custom attributes not writable by users |
+| Driver map | Live tracking from app open, trip starts at the live fix, traffic-coloured route with casing, traffic layer on by default, full screen, navigation camera, map types, next-stop card, remaining distance/time/arrival |
+| Alarm | Rings on signed-out phones (devices stay registered, signed token answers "I'm coming"), server-side device ownership, permission prompt + banner for families |
+
+**Verification done here:** TypeScript (app + backend), lint (0 errors), 46 unit tests, local CDK
+synthesis of the whole backend (schema transform, auth rules, IAM policies – no circular
+dependencies), iOS/Android/web bundle export, and one live Google Routes call proving
+`TRAFFIC_ON_POLYLINE` works together with waypoint optimisation.
+
+**Not verified yet (needs AWS access, which was expired during this session):** the deployed
+backend. After `git push` the hosting pipeline deploys the new schema (four new indexes on existing
+tables are back-filled by DynamoDB), then: regenerate `amplify_outputs.json`, publish the Expo update,
+build the SDK 58 Android APK, and run the end-to-end checks (sign-up → school → staff → trip → alarm,
+directory → application → office decision).
+
+**Known limits:** anyone can create a school (no moderation queue yet); Android push still needs the
+Firebase/FCM setup in README §7; iOS custom sound and Critical Alerts need a real iOS build and
+Apple's entitlement; a school admin could rename a record's `schoolId` to another school's id (moving
+it out of their own school, never reading the other school's data) – closing this needs field-level
+rules or Lambda-only writes.

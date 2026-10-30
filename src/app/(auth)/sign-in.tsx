@@ -1,26 +1,27 @@
 import React, { useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Redirect, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, Input, Screen, Text, useTheme } from '../../ui';
+import { Button, Divider, Gradient, Input, Screen, Text, useTheme } from '../../ui';
+import { shade } from '../../ui/theme';
 import { toast } from '../../ui/Toast';
-import { authErrorKey, signInWithId, useSession } from '../../lib/auth/session';
+import { authErrorKey, signInWithId, useSession, useSessionStore } from '../../lib/auth/session';
 import { setAppLanguage, currentLanguage } from '../../lib/i18n';
-import { SCHOOL_NAME_FALLBACK } from '../../lib/amplify';
 import { homeRouteForRole } from '../../lib/auth/routing';
 
 export default function SignInScreen() {
   const { t, i18n } = useTranslation();
   const router = useRouter();
   const theme = useTheme();
+  const { colors, spacing } = theme;
   const session = useSession();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (session.status === 'signedIn' && session.role) return <Redirect href={homeRouteForRole(session.role) as never} />;
+  if (session.status === 'signedIn') return <Redirect href={(session.role ? homeRouteForRole(session.role) : '/onboarding/school') as never} />;
 
   const submit = async () => {
     if (!username.trim() || !password) {
@@ -32,8 +33,11 @@ export default function SignInScreen() {
     try {
       const res = await signInWithId(username, password);
       if (res.step === 'NEW_PASSWORD') router.replace('/(auth)/new-password');
-      else if (res.step === 'OTHER') setError(res.name);
-      // DONE → session store updates and index redirects
+      else if (res.step === 'CONFIRM_SIGN_UP') {
+        useSessionStore.getState().setSignup({ email: username.trim().toLowerCase(), password, name: '' });
+        router.push('/(auth)/verify' as never);
+      } else if (res.step === 'OTHER') setError(res.name);
+      // DONE → the session store updates and the guards route to the workspace
     } catch (e) {
       setError(t(authErrorKey(e)));
     } finally {
@@ -41,30 +45,43 @@ export default function SignInScreen() {
     }
   };
 
-  const noRole = session.status === 'signedIn' && !session.role;
-
   return (
-    <Screen scroll keyboard maxWidth={480} contentStyle={{ paddingTop: theme.spacing.huge }}>
-      <View style={{ alignItems: 'center', gap: theme.spacing.md, marginBottom: theme.spacing.xxxl }}>
-        <View style={{ width: 84, height: 84, borderRadius: 24, backgroundColor: theme.colors.primary, alignItems: 'center', justifyContent: 'center' }}>
-          <Ionicons name="bus" size={44} color={theme.colors.onPrimary} />
+    <Screen scroll keyboard maxWidth={460} contentStyle={{ paddingTop: spacing.md }}>
+      <View style={styles.topRow}>
+        <Pressable accessibilityRole="button" accessibilityLabel={t('common.back')} hitSlop={10} onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} style={[styles.back, { backgroundColor: colors.surfaceAlt }]}>
+          <Ionicons name="arrow-back" size={22} color={colors.text} />
+        </Pressable>
+        <View style={{ flexDirection: 'row', gap: spacing.md }}>
+          {(['en', 'ar'] as const).map((lang) => (
+            <Pressable
+              key={lang}
+              accessibilityRole="button"
+              onPress={async () => {
+                const restart = await setAppLanguage(lang);
+                if (restart) toast.info(t('common.restartRequired'));
+              }}
+            >
+              <Text variant="captionStrong" color={currentLanguage() === lang || i18n.language === lang ? 'primary' : 'textMuted'}>
+                {lang === 'en' ? t('common.english') : t('common.arabic')}
+              </Text>
+            </Pressable>
+          ))}
         </View>
+      </View>
+
+      <View style={{ alignItems: 'center', gap: spacing.md, marginTop: spacing.xxl, marginBottom: spacing.xxxl }}>
+        <Gradient stops={[shade(colors.primary, 10), colors.primary, shade(colors.primary, -30)]} style={styles.mark}>
+          <Ionicons name="bus" size={42} color={colors.onPrimary} />
+        </Gradient>
         <Text variant="display" align="center">
-          {SCHOOL_NAME_FALLBACK}
+          {t('auth.signInTitle')}
         </Text>
         <Text color="textMuted" align="center">
           {t('auth.signInSubtitle')}
         </Text>
       </View>
 
-      {noRole ? (
-        <View style={{ backgroundColor: theme.colors.warningSoft, padding: theme.spacing.lg, borderRadius: theme.radius.md, marginBottom: theme.spacing.lg }}>
-          <Text variant="bodyStrong">{t('auth.noRoleTitle')}</Text>
-          <Text color="textMuted">{t('auth.noRoleBody')}</Text>
-        </View>
-      ) : null}
-
-      <View style={{ gap: theme.spacing.lg }}>
+      <View style={{ gap: spacing.lg }}>
         <Input
           label={t('auth.schoolId')}
           placeholder={t('auth.schoolIdPlaceholder')}
@@ -95,22 +112,21 @@ export default function SignInScreen() {
         <Button title={t('auth.forgotPassword')} variant="ghost" onPress={() => router.push('/(auth)/forgot-password')} />
       </View>
 
-      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: theme.spacing.lg, marginTop: theme.spacing.huge }}>
-        {(['en', 'ar'] as const).map((lang) => (
-          <Pressable
-            key={lang}
-            accessibilityRole="button"
-            onPress={async () => {
-              const restart = await setAppLanguage(lang);
-              if (restart) toast.info(t('common.restartRequired'));
-            }}
-          >
-            <Text variant="captionStrong" color={currentLanguage() === lang || i18n.language === lang ? 'primary' : 'textMuted'}>
-              {lang === 'en' ? t('common.english') : t('common.arabic')}
-            </Text>
-          </Pressable>
-        ))}
+      <View style={[styles.orRow, { marginTop: spacing.xl }]}>
+        <Divider style={{ flex: 1, width: undefined }} />
+        <Text variant="caption" color="textFaint">
+          {t('landing.ownSchoolQuestion')}
+        </Text>
+        <Divider style={{ flex: 1, width: undefined }} />
       </View>
+      <Button title={t('landing.createSchool')} icon="business-outline" variant="outline" size="lg" fullWidth style={{ marginTop: spacing.md }} onPress={() => router.push('/(auth)/sign-up' as never)} />
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  back: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  mark: { width: 84, height: 84, borderRadius: 26, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  orRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+});

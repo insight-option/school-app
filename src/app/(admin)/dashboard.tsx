@@ -13,7 +13,8 @@ import { useProfilesByRole } from '../../features/profiles';
 import { useTripsOnDate } from '../../features/trips';
 import { useAbsencesOnDate } from '../../features/dayStatus';
 import { useAllFeedback } from '../../features/engagement';
-import { useInbox, OFFICE_USER_ID } from '../../features/messaging';
+import { useInbox, useOfficeSeat } from '../../features/messaging';
+import { useApplications, useMySchoolListing } from '../../features/admissions';
 import { client, unwrap } from '../../lib/data/client';
 import { qk, queryClient } from '../../lib/query/client';
 import { todayIn, formatTime } from '../../lib/util/format';
@@ -33,7 +34,13 @@ export default function AdminDashboard() {
   const trips = useTripsOnDate(today);
   const absences = useAbsencesOnDate(today);
   const feedback = useAllFeedback(true);
-  const inbox = useInbox(OFFICE_USER_ID);
+  const officeSeat = useOfficeSeat();
+  const inbox = useInbox(officeSeat);
+  const applications = useApplications();
+  const listing = useMySchoolListing();
+  const newApplications = (applications.data ?? []).filter((a) => a.status === 'NEW').length;
+  // A fresh school: nudge the office to fill in what families see in the directory.
+  const profileIncomplete = !!listing.data && !listing.data.description && !listing.data.coverKey;
 
   // Live positions of every bus (subscribe to each; a school has a handful of buses).
   const busIds = useMemo(() => (buses.data ?? []).map((b) => b.busId), [buses.data]);
@@ -66,7 +73,15 @@ export default function AdminDashboard() {
 
   return (
     <Screen title={t('admin.dashboard')} subtitle={settings.data?.name} scroll maxWidth={1200} refreshing={trips.isRefetching} onRefresh={() => trips.refetch()}>
+      {profileIncomplete || (!listing.isLoading && !listing.data && !!settings.data) ? (
+        <Card tone="primary" onPress={() => router.push('/(admin)/school-profile' as never)} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: theme.spacing.md }}>
+          <Ionicons name="storefront" size={26} color={theme.colors.primary} />
+          <Text style={{ flex: 1 }}>{t('publicProfile.setupBanner')}</Text>
+          <Ionicons name="chevron-forward" size={20} color={theme.colors.primary} />
+        </Card>
+      ) : null}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing.md, marginTop: theme.spacing.md }}>
+        <StatCard icon="clipboard" label={t('admissions.dashboardCard')} value={applications.data ? newApplications : undefined} onPress={() => router.push('/(admin)/applications' as never)} loading={applications.isLoading} />
         <StatCard icon="people" label={t('admin.counts.students')} value={studentCount} onPress={() => router.push('/(admin)/students')} loading={students.isLoading && classes.isLoading} />
         <StatCard icon="school" label={t('admin.counts.teachers')} value={teacherCount} onPress={() => router.push('/(admin)/teachers')} loading={teachers.isLoading} />
         <StatCard icon="bus" label={t('admin.counts.buses')} value={buses.data?.length} onPress={() => router.push('/(admin)/buses')} loading={buses.isLoading} />

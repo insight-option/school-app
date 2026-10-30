@@ -1,3 +1,4 @@
+import 'react-native-get-random-values';
 import '../lib/amplify';
 import '../lib/i18n';
 import '../lib/query/mutationDefaults';
@@ -23,6 +24,19 @@ import { getPushPermissionStatus, installNotificationHandler, isPushSupported, r
 import { useAlarmStore } from '../lib/alarm/alarmPlayer';
 
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
+
+/** Everything the alarm screen needs, straight from the push (works without network or sign-in). */
+function alarmFromPush(data: PushData) {
+  return {
+    tripStopId: data.tripStopId ?? 'unknown',
+    driverName: data.driverName,
+    plate: data.plate,
+    etaSeconds: data.etaSeconds ?? null,
+    studentName: data.studentName,
+    ackToken: data.ackToken,
+    ackExpires: data.ackExpires,
+  };
+}
 
 export const unstable_settings = { anchor: 'index' };
 
@@ -107,9 +121,18 @@ function RootNavigator() {
   const role = session.role;
   return (
     <Stack screenOptions={{ headerShown: false, animation: Platform.OS === 'web' ? 'none' : 'default' }}>
+      {/* Public: school directory (signed out) / redirect to the workspace (signed in) */}
       <Stack.Screen name="index" />
-      <Stack.Protected guard={!signedIn || !role}>
+      <Stack.Screen name="schools/[schoolId]/index" />
+      <Stack.Screen name="schools/[schoolId]/apply" />
+      <Stack.Screen name="application-status" />
+      {/* The alarm must open from a notification even when the phone is signed out. */}
+      <Stack.Screen name="alarm/[tripStopId]" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
+      <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="(auth)" />
+      </Stack.Protected>
+      <Stack.Protected guard={signedIn && !role}>
+        <Stack.Screen name="onboarding/school" />
       </Stack.Protected>
       <Stack.Protected guard={signedIn && role === 'STUDENT'}>
         <Stack.Screen name="(student)" />
@@ -125,7 +148,6 @@ function RootNavigator() {
       </Stack.Protected>
       <Stack.Protected guard={signedIn}>
         <Stack.Screen name="chat/[conversationId]" />
-        <Stack.Screen name="alarm/[tripStopId]" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
         <Stack.Screen name="notifications" />
         <Stack.Screen name="privacy" />
         <Stack.Screen name="change-password" />
@@ -144,21 +166,25 @@ function PushRouter() {
   const show = useAlarmStore((s) => s.show);
 
   useEffect(() => {
-    if (!isPushSupported || !lastResponse || session.status !== 'signedIn') return;
+    if (!isPushSupported || !lastResponse || session.status === 'loading') return;
+    const data = lastResponse.notification.request.content.data as PushData | undefined;
+    const isAlarm = data?.type === 'ALARM' || data?.type === 'TEST_ALARM';
+    // Alarms open even on a signed-out phone; everything else needs the account.
+    if (session.status !== 'signedIn' && !isAlarm) return;
     const id = lastResponse.notification.request.identifier;
     if (handled.current === id) return;
     handled.current = id;
-    const data = lastResponse.notification.request.content.data as PushData | undefined;
+    if (data?.type === 'ALARM' && data.tripStopId) show(alarmFromPush(data));
     const route = routeForPush(data, session.role);
     if (route) router.push(route as never);
     void Notifications.clearLastNotificationResponseAsync?.();
-  }, [lastResponse, session.status, session.role, router]);
+  }, [lastResponse, session.status, session.role, router, show]);
 
   useEffect(() => {
     if (!isPushSupported) return;
     const sub = Notifications.addNotificationReceivedListener((n) => {
       const data = n.request.content.data as PushData | undefined;
-      if (data?.type === 'ALARM' && data.tripStopId) show({ tripStopId: data.tripStopId, driverName: data.driverName, plate: data.plate, etaSeconds: data.etaSeconds ?? null });
+      if (data?.type === 'ALARM' && data.tripStopId) show(alarmFromPush(data));
       if (data?.type === 'TEST_ALARM') show({ tripStopId: 'test', test: true });
     });
     return () => sub.remove();

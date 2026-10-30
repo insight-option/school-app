@@ -1,24 +1,23 @@
 import React from 'react';
-import { ActivityIndicator, View } from 'react-native';
 import { Redirect } from 'expo-router';
 import { useSession, useSessionStore } from '../lib/auth/session';
 import { homeRouteForRole } from '../lib/auth/routing';
-import { useTheme } from '../ui/theme';
+import { DirectoryScreen } from '../components/directory/DirectoryScreen';
 
-/** Entry: wait for the session, then send the user to their workspace (or sign-in). */
+/**
+ * Entry. Signed out → the public school directory (sign in / create my school). Signed in → the
+ * user's workspace, or the school set-up wizard for a new account that has no school yet.
+ * While the session loads the native splash screen is still visible.
+ */
 export default function Index() {
   const session = useSession();
   const pendingUsername = useSessionStore((s) => s.pendingUsername);
-  const { colors } = useTheme();
 
-  if (session.status === 'loading') {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
-        <ActivityIndicator color={colors.primary} size="large" />
-      </View>
-    );
+  if (session.status === 'loading') return null;
+  if (session.status === 'signedOut') {
+    if (pendingUsername) return <Redirect href="/(auth)/new-password" />;
+    return <DirectoryScreen />;
   }
-  if (session.status === 'signedOut') return <Redirect href={pendingUsername ? '/(auth)/new-password' : '/(auth)/sign-in'} />;
-  if (!session.role) return <Redirect href="/(auth)/sign-in" />;
+  if (!session.role) return <Redirect href={'/onboarding/school' as never} />;
   return <Redirect href={homeRouteForRole(session.role) as never} />;
 }

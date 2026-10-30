@@ -1,18 +1,14 @@
+import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import type { Schema } from '../../data/resource';
 import { audit, forEachPage, getDataClient, getSettings, listAll, mapLimit, nowIso, type DataClient, type DataEnv, unwrap } from '../shared/data';
-import {
-  OFFICE_USER_ID,
-  directConversationId,
-  ensureConversation,
-  ensureOfficeConversation,
-  listMembers,
-  upsertMember,
-} from '../shared/conversations';
+import { directConversationId, ensureConversation, ensureOfficeConversation, listMembers, officeSeatId, upsertMember } from '../shared/conversations';
+import { assertSameSchool, resolveAdmin, resolveCaller, type SchoolCaller } from '../shared/caller';
 import { t } from '../shared/i18n';
 import { getAdminUserIds, notifyUsers } from '../shared/notify';
-import { pushToUsers } from '../shared/push';
-import { HandlerError, opName, requireIdentity, type AppSyncEvent, type Caller } from '../shared/types';
+import { isExpoPushToken, pushToUsers } from '../shared/push';
+import { DIRECTORY_PUBLIC, newApplicationReference, normalizeSearch } from '../shared/tenancy';
+import { HandlerError, opName, requireIdentity, type AppSyncEvent } from '../shared/types';
 
 const env = process.env as unknown as DataEnv;
 
@@ -20,13 +16,7 @@ type Profile = Schema['Profile']['type'];
 type Message = Schema['Message']['type'];
 type MessageType = Schema['MessageType']['type'];
 type Conversation = Schema['Conversation']['type'];
-
-async function callerProfile(client: DataClient, caller: Caller): Promise<Profile> {
-  const res = await client.models.Profile.get({ userId: caller.sub });
-  if (!res.data) throw new HandlerError('Profile not found. Ask the office to recreate your account.', 'NOT_FOUND');
-  if (res.data.isActive === false) throw new HandlerError('Account disabled', 'FORBIDDEN');
-  return res.data;
-}
+type Application = Schema['Application']['type'];
 
 function preview(type: MessageType, text: string | null | undefined, lang: string | null | undefined): string {
   const s = t(lang);
@@ -44,6 +34,23 @@ function preview(type: MessageType, text: string | null | undefined, lang: strin
   }
 }
 
+function issues(e: z.ZodError): string {
+  return e.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; ');
+}
+
+/** AWSJSON arguments may arrive as an object or as (possibly double-encoded) JSON text. */
+function jsonArg(value: unknown): unknown {
+  let v = value;
+  for (let i = 0; i < 3 && typeof v === 'string'; i++) {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      throw new HandlerError('Invalid JSON input', 'VALIDATION');
+    }
+  }
+  return v;
+}
+
 // ────────────────────────────── messaging ──────────────────────────────
 const SendMessageInput = z.object({
   conversationId: z.string().min(3).max(200),
@@ -54,7 +61,7 @@ const SendMessageInput = z.object({
   clientId: z.string().max(100).optional().nullable(),
 });
 
-async function sendMessage(client: DataClient, caller: Caller, raw: unknown): Promise<Message> {
+async function sendMessage(client: DataClient, caller: SchoolCaller, raw: unknown): Promise<Message> {
   const r = SendMessageInput.safeParse(raw);
   if (!r.success) throw new HandlerError(r.error.issues.map((i) => i.message).join('; '), 'VALIDATION');
   const input = r.data;
@@ -64,10 +71,13 @@ async function sendMessage(client: DataClient, caller: Caller, raw: unknown): Pr
     throw new HandlerError('Attachment does not belong to this conversation', 'VALIDATION');
   }
 
-  const profile = await callerProfile(client, caller);
+  const profile = caller.profile;
   const conv = unwrap(await client.models.Conversation.get({ id: input.conversationId }), 'Conversation.get');
+  if (!conv) throw new HandlerError('Conversation not found', 'NOT_FOUND');
+  assertSameSchool(caller, conv.schoolId, 'Conversation');
+  const officeSeat = officeSeatId(caller.schoolId);
   const members = await listMembers(client, conv.id);
-  const senderSeat = caller.isAdmin ? OFFICE_USER_ID : caller.sub;
+  const senderSeat = caller.isAdmin ? officeSeat : caller.sub;
   const seat = members.find((m) => m.userId === senderSeat);
   if (!seat) throw new HandlerError('You are not a member of this conversation', 'FORBIDDEN');
 
@@ -90,6 +100,7 @@ async function sendMessage(client: DataClient, caller: Caller, raw: unknown): Pr
     }),
     'Message.create',
   );
+  if (!message) throw new Error('Message.create returned nothing');
 
   const previewEn = preview(input.type, input.text, 'en');
   await client.models.Conversation.update({
@@ -118,7 +129,7 @@ async function sendMessage(client: DataClient, caller: Caller, raw: unknown): Pr
   const pushTargets = recipients.filter((m) => !m.isViewing);
   const userIds: string[] = [];
   for (const m of pushTargets) {
-    if (m.userId === OFFICE_USER_ID) userIds.push(...(await getAdminUserIds(client)));
+    if (m.userId === officeSeat) userIds.push(...(await getAdminUserIds(client, caller.schoolId)));
     else userIds.push(m.userId);
   }
   const uniqueIds = Array.from(new Set(userIds.filter((u) => u !== caller.sub)));
@@ -126,7 +137,7 @@ async function sendMessage(client: DataClient, caller: Caller, raw: unknown): Pr
     const profiles = await mapLimit(uniqueIds, 10, async (userId) => (await client.models.Profile.get({ userId })).data);
     const byLang = new Map<string, string[]>();
     profiles.forEach((p, i) => {
-      if (!p || p.isActive === false) return;
+      if (!p || p.isActive === false || p.schoolId !== caller.schoolId) return;
       const lang = p.language === 'ar' ? 'ar' : 'en';
       byLang.set(lang, [...(byLang.get(lang) ?? []), uniqueIds[i]]);
     });
@@ -158,11 +169,13 @@ async function sendMessage(client: DataClient, caller: Caller, raw: unknown): Pr
   return message;
 }
 
-async function openDirectConversation(client: DataClient, caller: Caller, args: { otherUserId: string }): Promise<Conversation> {
+async function openDirectConversation(client: DataClient, caller: SchoolCaller, args: { otherUserId: string }): Promise<Conversation> {
   if (caller.isAdmin) throw new HandlerError('Admins use the office conversation (openOfficeConversation)', 'VALIDATION');
   if (!args.otherUserId || args.otherUserId === caller.sub) throw new HandlerError('Invalid user', 'VALIDATION');
-  const me = await callerProfile(client, caller);
+  const me = caller.profile;
   const other = unwrap(await client.models.Profile.get({ userId: args.otherUserId }), 'Profile.get');
+  if (!other) throw new HandlerError('User not found', 'NOT_FOUND');
+  assertSameSchool(caller, other.schoolId, 'User');
   if (other.isActive === false) throw new HandlerError('This user is no longer active', 'FORBIDDEN');
 
   const settings = await getSettings(client, me.schoolId);
@@ -185,7 +198,7 @@ async function openDirectConversation(client: DataClient, caller: Caller, args: 
     case 'DRIVER-TEACHER':
     case 'TEACHER-TEACHER':
     case 'DRIVER-DRIVER':
-      allowed = true; // staff may message each other
+      allowed = true; // staff of the same school may message each other
       break;
     default:
       allowed = false;
@@ -231,9 +244,11 @@ async function isClassTeacher(client: DataClient, classId: string, teacherId: st
   return c.data?.teacherId === teacherId;
 }
 
-async function openOfficeConversation(client: DataClient, caller: Caller, args: { userId?: string | null }): Promise<Conversation> {
+async function openOfficeConversation(client: DataClient, caller: SchoolCaller, args: { userId?: string | null }): Promise<Conversation> {
   const targetId = caller.isAdmin && args.userId ? args.userId : caller.sub;
-  const target = unwrap(await client.models.Profile.get({ userId: targetId }), 'Profile.get');
+  const target = targetId === caller.sub ? caller.profile : unwrap(await client.models.Profile.get({ userId: targetId }), 'Profile.get');
+  if (!target) throw new HandlerError('User not found', 'NOT_FOUND');
+  assertSameSchool(caller, target.schoolId, 'User');
   if (target.role === 'ADMIN') throw new HandlerError('Admins do not have an office conversation', 'VALIDATION');
   const subtitle = target.role === 'STUDENT' ? (target.className ?? 'Student') : target.role === 'DRIVER' ? `Bus ${target.busName ?? ''}` : 'Teacher';
   return ensureOfficeConversation(client, {
@@ -246,9 +261,11 @@ async function openOfficeConversation(client: DataClient, caller: Caller, args: 
   });
 }
 
-async function reportMessage(client: DataClient, caller: Caller, args: { messageId: string; reason?: string | null }) {
-  const me = await callerProfile(client, caller);
+async function reportMessage(client: DataClient, caller: SchoolCaller, args: { messageId: string; reason?: string | null }) {
+  const me = caller.profile;
   const msg = unwrap(await client.models.Message.get({ id: args.messageId }), 'Message.get');
+  if (!msg) throw new HandlerError('Message not found', 'NOT_FOUND');
+  assertSameSchool(caller, msg.schoolId, 'Message');
   await client.models.MessageReport.create({
     schoolId: msg.schoolId,
     messageId: msg.id,
@@ -261,7 +278,7 @@ async function reportMessage(client: DataClient, caller: Caller, args: { message
     reportedAt: nowIso(),
     resolved: false,
   });
-  const admins = await getAdminUserIds(client);
+  const admins = await getAdminUserIds(client, caller.schoolId);
   const s = t('en');
   await notifyUsers(client, {
     schoolId: msg.schoolId,
@@ -286,20 +303,21 @@ const FeedbackInput = z.object({
   attachmentKeys: z.array(z.string().nullable()).max(10).optional().nullable(),
 });
 
-async function submitFeedback(client: DataClient, caller: Caller, raw: unknown) {
+async function submitFeedback(client: DataClient, caller: SchoolCaller, raw: unknown) {
   const r = FeedbackInput.safeParse(raw);
-  if (!r.success) throw new HandlerError(r.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '), 'VALIDATION');
+  if (!r.success) throw new HandlerError(issues(r.error), 'VALIDATION');
   const input = r.data;
-  const author = await callerProfile(client, caller);
+  const author = caller.profile;
   if (author.role !== 'TEACHER' && author.role !== 'ADMIN') throw new HandlerError('Only teachers and the office can send feedback', 'FORBIDDEN');
   const studentIds = Array.from(new Set(input.studentIds.filter((x): x is string => !!x)));
   const attachmentKeys = (input.attachmentKeys ?? []).filter((x): x is string => !!x);
-  const admins = input.audience === 'PARENT' ? [] : await getAdminUserIds(client);
+  if (attachmentKeys.some((k) => !k.startsWith('feedback/'))) throw new HandlerError('Invalid attachment', 'VALIDATION');
+  const admins = input.audience === 'PARENT' ? [] : await getAdminUserIds(client, caller.schoolId);
   let count = 0;
 
   await mapLimit(studentIds, 4, async (studentId) => {
     const student = (await client.models.Profile.get({ userId: studentId })).data;
-    if (!student || student.role !== 'STUDENT') return;
+    if (!student || student.role !== 'STUDENT' || student.schoolId !== caller.schoolId) return;
     if (author.role === 'TEACHER') {
       const teaches = !!student.classId && ((author.classIds ?? []).includes(student.classId) || (await isClassTeacher(client, student.classId, author.userId)));
       if (!teaches) throw new HandlerError(`${student.fullName} is not in one of your classes`, 'FORBIDDEN');
@@ -324,6 +342,7 @@ async function submitFeedback(client: DataClient, caller: Caller, raw: unknown) 
       }),
       'Feedback.create',
     );
+    if (!fb) return;
     count++;
     const s = t(student.language);
     if (input.audience !== 'OFFICE') {
@@ -361,14 +380,49 @@ async function submitFeedback(client: DataClient, caller: Caller, raw: unknown) 
   return { ok: true, count };
 }
 
+/** Teachers of the student's class (and the office) see the student's whole feedback history. */
+async function listStudentFeedback(client: DataClient, caller: SchoolCaller, args: { studentId: string }) {
+  const student = unwrap(await client.models.Profile.get({ userId: args.studentId }), 'Profile.get');
+  if (!student || student.role !== 'STUDENT') throw new HandlerError('Student not found', 'NOT_FOUND');
+  assertSameSchool(caller, student.schoolId, 'Student');
+  if (!caller.isAdmin) {
+    const me = caller.profile;
+    const teaches = me.role === 'TEACHER' && !!student.classId && ((me.classIds ?? []).includes(student.classId) || (await isClassTeacher(client, student.classId, me.userId)));
+    if (!teaches) throw new HandlerError('Student not found', 'NOT_FOUND');
+  }
+  const rows = await listAll(
+    (nextToken) => client.models.Feedback.listFeedbackByStudent({ studentId: student.userId }, { limit: 100, nextToken, sortDirection: 'DESC' }),
+    20,
+  );
+  return rows
+    .filter((f) => f.schoolId === caller.schoolId)
+    .map((f) => ({
+      id: f.id,
+      studentId: f.studentId,
+      studentName: f.studentName,
+      className: f.className ?? null,
+      authorId: f.authorId,
+      authorName: f.authorName,
+      authorRole: f.authorRole,
+      audience: f.audience,
+      category: f.category,
+      rating: f.rating ?? null,
+      title: f.title,
+      body: f.body,
+      attachmentKeys: (f.attachmentKeys ?? []).filter((k): k is string => !!k),
+      postedAt: f.postedAt,
+    }));
+}
+
 // ────────────────────────────── broadcasts (async fan-out) ──────────────────────────────
-async function sendBroadcast(client: DataClient, caller: Caller, args: { broadcastId: string }) {
-  if (!caller.isAdmin) throw new HandlerError('Admin only', 'FORBIDDEN');
+async function sendBroadcast(client: DataClient, caller: SchoolCaller, args: { broadcastId: string }) {
   const b = unwrap(await client.models.Broadcast.get({ id: args.broadcastId }), 'Broadcast.get');
+  if (!b) throw new HandlerError('Broadcast not found', 'NOT_FOUND');
+  assertSameSchool(caller, b.schoolId, 'Broadcast');
   await client.models.Broadcast.update({ id: b.id, deliveryStatus: 'SENDING' });
   let recipients = 0;
   const pageHandler = async (profiles: Profile[]) => {
-    const ids = profiles.filter((p) => p.isActive !== false && p.role !== 'ADMIN').map((p) => p.userId);
+    const ids = profiles.filter((p) => p.isActive !== false && p.role !== 'ADMIN' && p.schoolId === b.schoolId).map((p) => p.userId);
     if (!ids.length) return;
     recipients += ids.length;
     await notifyUsers(client, {
@@ -381,23 +435,33 @@ async function sendBroadcast(client: DataClient, caller: Caller, args: { broadca
       push: true,
     });
   };
+  const byRole = (role: 'STUDENT' | 'TEACHER' | 'DRIVER') =>
+    forEachPage((nextToken) => client.models.Profile.listProfilesBySchoolAndRole({ schoolId: b.schoolId, role: { eq: role } }, { limit: 100, nextToken }), pageHandler);
   try {
     switch (b.audience) {
       case 'ALL_STUDENTS':
-        await forEachPage((nextToken) => client.models.Profile.listProfilesByRole({ role: 'STUDENT' }, { limit: 100, nextToken }), pageHandler);
+        await byRole('STUDENT');
         break;
       case 'ALL_TEACHERS':
-        await forEachPage((nextToken) => client.models.Profile.listProfilesByRole({ role: 'TEACHER' }, { limit: 100, nextToken }), pageHandler);
+        await byRole('TEACHER');
         break;
       case 'ALL_DRIVERS':
-        await forEachPage((nextToken) => client.models.Profile.listProfilesByRole({ role: 'DRIVER' }, { limit: 100, nextToken }), pageHandler);
+        await byRole('DRIVER');
         break;
-      case 'CLASS':
-        await forEachPage((nextToken) => client.models.Profile.listProfilesByClass({ classId: b.targetId ?? '' }, { limit: 100, nextToken }), pageHandler);
+      case 'CLASS': {
+        const cls = b.targetId ? (await client.models.Class.get({ id: b.targetId })).data : null;
+        if (cls?.schoolId === b.schoolId) {
+          await forEachPage((nextToken) => client.models.Profile.listProfilesByClass({ classId: cls.id }, { limit: 100, nextToken }), pageHandler);
+        }
         break;
-      case 'BUS':
-        await forEachPage((nextToken) => client.models.Profile.listProfilesByBus({ busId: b.targetId ?? '' }, { limit: 100, nextToken }), pageHandler);
+      }
+      case 'BUS': {
+        const bus = b.targetId ? (await client.models.Bus.get({ busId: b.targetId })).data : null;
+        if (bus?.schoolId === b.schoolId) {
+          await forEachPage((nextToken) => client.models.Profile.listProfilesByBus({ busId: bus.busId }, { limit: 100, nextToken }), pageHandler);
+        }
         break;
+      }
     }
     await client.models.Broadcast.update({ id: b.id, recipientCount: recipients, deliveryStatus: 'SENT' });
   } catch (e) {
@@ -415,11 +479,12 @@ async function sendBroadcast(client: DataClient, caller: Caller, args: { broadca
   });
 }
 
-async function sendPush(client: DataClient, caller: Caller, args: { userIds: (string | null)[]; title: string; body: string; data?: unknown }) {
-  if (!caller.isAdmin) throw new HandlerError('Admin only', 'FORBIDDEN');
-  const ids = args.userIds.filter((x): x is string => !!x);
-  const data = typeof args.data === 'string' ? (JSON.parse(args.data) as Record<string, unknown>) : ((args.data as Record<string, unknown> | undefined) ?? {});
-  const res = await notifyUsers(client, { schoolId: caller.schoolId, userIds: ids, type: 'SYSTEM', title: args.title, body: args.body, data, push: true });
+async function sendPush(client: DataClient, caller: SchoolCaller, args: { userIds: (string | null)[]; title: string; body: string; data?: unknown }) {
+  const requested = Array.from(new Set(args.userIds.filter((x): x is string => !!x))).slice(0, 500);
+  const profiles = await mapLimit(requested, 10, async (userId) => (await client.models.Profile.get({ userId })).data);
+  const ids = profiles.flatMap((p) => (p && p.schoolId === caller.schoolId ? [p.userId] : []));
+  const data = (jsonArg(args.data) as Record<string, unknown> | undefined) ?? {};
+  const res = await notifyUsers(client, { schoolId: caller.schoolId, userIds: ids, type: 'SYSTEM', title: args.title.slice(0, 140), body: args.body.slice(0, 500), data, push: true });
   return { ok: true, count: res.pushed };
 }
 
@@ -431,10 +496,10 @@ const MyProfileInput = z.object({
   parentPhone: z.string().max(32).optional().nullable(),
 });
 
-async function updateMyProfile(client: DataClient, caller: Caller, raw: unknown): Promise<Profile> {
+async function updateMyProfile(client: DataClient, caller: SchoolCaller, raw: unknown): Promise<Profile> {
   const r = MyProfileInput.safeParse(raw);
   if (!r.success) throw new HandlerError(r.error.issues.map((i) => i.message).join('; '), 'VALIDATION');
-  const me = await callerProfile(client, caller);
+  const me = caller.profile;
   const patch: Partial<Profile> & { userId: string } = { userId: me.userId };
   if (r.data.avatarKey !== undefined && r.data.avatarKey !== null) {
     if (r.data.avatarKey && !r.data.avatarKey.startsWith('avatars/')) throw new HandlerError('Invalid avatar key', 'VALIDATION');
@@ -445,6 +510,7 @@ async function updateMyProfile(client: DataClient, caller: Caller, raw: unknown)
   if (r.data.parentPhone !== undefined && r.data.parentPhone !== null) patch.parentPhone = r.data.parentPhone || null;
   if (Object.keys(patch).length === 1) return me;
   const updated = unwrap(await client.models.Profile.update(patch), 'Profile.update');
+  if (!updated) throw new Error('Profile.update returned nothing');
   if (patch.avatarKey !== undefined) {
     // keep the avatar shown to chat peers fresh
     const memberships = await listAll((nextToken) => client.models.ConversationMember.listMembershipsByUser({ userId: me.userId }, { limit: 100, nextToken }));
@@ -461,17 +527,20 @@ async function updateMyProfile(client: DataClient, caller: Caller, raw: unknown)
   return updated;
 }
 
-async function updateHomeLocation(client: DataClient, caller: Caller, args: { lat: number; lng: number; address?: string | null; userId?: string | null }): Promise<Profile> {
+async function updateHomeLocation(client: DataClient, caller: SchoolCaller, args: { lat: number; lng: number; address?: string | null; userId?: string | null }): Promise<Profile> {
   if (!Number.isFinite(args.lat) || !Number.isFinite(args.lng) || Math.abs(args.lat) > 90 || Math.abs(args.lng) > 180) {
     throw new HandlerError('Invalid coordinates', 'VALIDATION');
   }
   const targetId = caller.isAdmin && args.userId ? args.userId : caller.sub;
-  const target = unwrap(await client.models.Profile.get({ userId: targetId }), 'Profile.get');
+  const target = targetId === caller.sub ? caller.profile : unwrap(await client.models.Profile.get({ userId: targetId }), 'Profile.get');
+  if (!target) throw new HandlerError('User not found', 'NOT_FOUND');
+  assertSameSchool(caller, target.schoolId, 'User');
   const before = target.homeLocation ? { ...target.homeLocation, address: target.homeAddress } : null;
   const updated = unwrap(
     await client.models.Profile.update({ userId: target.userId, homeLocation: { lat: args.lat, lng: args.lng }, homeAddress: args.address?.slice(0, 400) ?? undefined }),
     'Profile.update',
   );
+  if (!updated) throw new Error('Profile.update returned nothing');
   await audit(client, {
     schoolId: target.schoolId,
     actorId: caller.sub,
@@ -483,7 +552,7 @@ async function updateHomeLocation(client: DataClient, caller: Caller, args: { la
     after: { lat: args.lat, lng: args.lng, address: args.address },
   });
   if (before && !caller.isAdmin) {
-    const admins = await getAdminUserIds(client);
+    const admins = await getAdminUserIds(client, caller.schoolId);
     const s = t('en');
     await notifyUsers(client, {
       schoolId: target.schoolId,
@@ -498,8 +567,8 @@ async function updateHomeLocation(client: DataClient, caller: Caller, args: { la
   return updated;
 }
 
-async function requestDataDeletion(client: DataClient, caller: Caller, args: { reason?: string | null }) {
-  const me = await callerProfile(client, caller);
+async function requestDataDeletion(client: DataClient, caller: SchoolCaller, args: { reason?: string | null }) {
+  const me = caller.profile;
   await audit(client, {
     schoolId: me.schoolId,
     actorId: caller.sub,
@@ -509,7 +578,7 @@ async function requestDataDeletion(client: DataClient, caller: Caller, args: { r
     entityId: me.userId,
     after: { reason: args.reason?.slice(0, 500) },
   });
-  const admins = await getAdminUserIds(client);
+  const admins = await getAdminUserIds(client, caller.schoolId);
   const s = t('en');
   await notifyUsers(client, {
     schoolId: me.schoolId,
@@ -523,13 +592,210 @@ async function requestDataDeletion(client: DataClient, caller: Caller, args: { r
   return { ok: true, message: 'Your request was sent to the school office.' };
 }
 
+// ────────────────────────────── admissions ──────────────────────────────
+const optText = (max: number) => z.string().trim().max(max).optional().nullable();
+const ApplicationInput = z.object({
+  studentName: z.string().trim().min(2, 'Student name is required').max(120),
+  dateOfBirth: z.union([z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date of birth must be YYYY-MM-DD'), z.literal('')]).optional().nullable(),
+  gender: z.union([z.enum(['MALE', 'FEMALE']), z.literal('')]).optional().nullable(),
+  gradeApplying: optText(60),
+  parentName: z.string().trim().min(2, 'Parent name is required').max(120),
+  relationship: optText(40),
+  parentEmail: z.email('A valid e-mail is required'),
+  parentPhone: z.string().trim().min(6, 'A valid phone number is required').max(32),
+  address: optText(300),
+  currentSchool: optText(120),
+  needsTransport: z.boolean().optional().nullable(),
+  notes: optText(2000),
+  language: z.enum(['en', 'ar']).optional().nullable(),
+});
+
+const MAX_APPLICATIONS_PER_EMAIL_PER_DAY = 5;
+const MAX_APPLICATIONS_PER_SCHOOL_PER_10_MIN = 40;
+
+/** Guest-callable: a family applies to a school that accepts online applications. */
+async function submitApplication(client: DataClient, args: { schoolId: string; application: unknown }) {
+  const parsed = ApplicationInput.safeParse(jsonArg(args.application));
+  if (!parsed.success) throw new HandlerError(issues(parsed.error), 'VALIDATION');
+  const input = parsed.data;
+  const school = (await client.models.School.get({ schoolId: args.schoolId })).data;
+  if (!school || school.directory !== DIRECTORY_PUBLIC) throw new HandlerError('School not found', 'NOT_FOUND');
+  if (!school.applicationsOpen) throw new HandlerError('This school is not accepting online applications right now', 'CONFLICT');
+  if (school.applicationDeadline && /^\d{4}-\d{2}-\d{2}$/.test(school.applicationDeadline) && school.applicationDeadline < new Date().toISOString().slice(0, 10)) {
+    throw new HandlerError('The application deadline has passed', 'CONFLICT');
+  }
+  const gradeOptions = (school.gradeOptions ?? []).filter((g): g is string => !!g);
+  if (input.gradeApplying && gradeOptions.length && !gradeOptions.includes(input.gradeApplying)) {
+    throw new HandlerError('Please choose one of the grades the school offers', 'VALIDATION');
+  }
+
+  // Abuse guards: per family e-mail and per school.
+  const emailLower = normalizeSearch(input.parentEmail);
+  const dayAgo = new Date(Date.now() - 24 * 3600_000).toISOString();
+  const recentByEmail = await client.models.Application.listApplicationsByEmail({ parentEmailLower: emailLower, submittedAt: { ge: dayAgo } }, { limit: 50 });
+  if ((recentByEmail.data ?? []).length >= MAX_APPLICATIONS_PER_EMAIL_PER_DAY) {
+    throw new HandlerError('Too many applications from this e-mail today. Please try again tomorrow.', 'RATE_LIMITED');
+  }
+  const duplicate = (recentByEmail.data ?? []).find((a) => a.schoolId === school.schoolId && normalizeSearch(a.studentName) === normalizeSearch(input.studentName));
+  if (duplicate) {
+    return { reference: duplicate.reference, schoolName: school.name, submittedAt: duplicate.submittedAt };
+  }
+  const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
+  const recentBySchool = await client.models.Application.listApplicationsBySchool({ schoolId: school.schoolId, submittedAt: { ge: tenMinAgo } }, { limit: MAX_APPLICATIONS_PER_SCHOOL_PER_10_MIN + 1 });
+  if ((recentBySchool.data ?? []).length > MAX_APPLICATIONS_PER_SCHOOL_PER_10_MIN) {
+    throw new HandlerError('The school is receiving many applications right now. Please try again in a few minutes.', 'RATE_LIMITED');
+  }
+
+  let reference = '';
+  for (let i = 0; i < 4 && !reference; i++) {
+    const candidate = newApplicationReference((n) => randomBytes(n));
+    const clash = await client.models.Application.listApplicationsByReference({ reference: candidate }, { limit: 1 });
+    if (!(clash.data ?? []).length) reference = candidate;
+  }
+  if (!reference) throw new Error('Could not allocate an application reference');
+
+  const submittedAt = nowIso();
+  const created = unwrap(
+    await client.models.Application.create({
+      schoolId: school.schoolId,
+      reference,
+      status: 'NEW',
+      studentName: input.studentName,
+      dateOfBirth: input.dateOfBirth || undefined,
+      gender: input.gender || undefined,
+      gradeApplying: input.gradeApplying || undefined,
+      parentName: input.parentName,
+      relationship: input.relationship || undefined,
+      parentEmail: input.parentEmail.trim(),
+      parentEmailLower: emailLower,
+      parentPhone: input.parentPhone,
+      address: input.address || undefined,
+      currentSchool: input.currentSchool || undefined,
+      needsTransport: input.needsTransport ?? undefined,
+      notes: input.notes || undefined,
+      language: input.language ?? 'en',
+      submittedAt,
+    }),
+    'Application.create',
+  );
+  if (!created) throw new Error('Application.create returned nothing');
+
+  const admins = await getAdminUserIds(client, school.schoolId);
+  const s = t('en');
+  await notifyUsers(client, {
+    schoolId: school.schoolId,
+    userIds: admins,
+    type: 'APPLICATION',
+    title: s.applicationTitle,
+    body: s.applicationBody(input.studentName, input.gradeApplying),
+    data: { applicationId: created.id, kind: 'APPLICATION' },
+    push: true,
+  });
+  await audit(client, {
+    schoolId: school.schoolId,
+    actorId: 'public',
+    actorName: input.parentName,
+    action: 'SUBMIT_APPLICATION',
+    entityType: 'Application',
+    entityId: created.id,
+    after: { reference, studentName: input.studentName, gradeApplying: input.gradeApplying },
+  });
+  return { reference, schoolName: school.name, submittedAt };
+}
+
+/** Guest-callable: the family looks up their application with the reference and e-mail. */
+async function checkApplication(client: DataClient, args: { reference: string; email: string }) {
+  const reference = (args.reference ?? '').trim().toUpperCase();
+  const email = normalizeSearch(args.email);
+  if (!/^AP-[A-Z0-9]{8}$/.test(reference) || !email) throw new HandlerError('Application not found', 'NOT_FOUND');
+  const res = await client.models.Application.listApplicationsByReference({ reference }, { limit: 2 });
+  const app = (res.data ?? []).find((a) => a.parentEmailLower === email);
+  if (!app) throw new HandlerError('Application not found. Check the reference and the e-mail you used.', 'NOT_FOUND');
+  const school = (await client.models.School.get({ schoolId: app.schoolId })).data;
+  return {
+    reference: app.reference,
+    schoolId: app.schoolId,
+    schoolName: school?.name ?? '',
+    studentName: app.studentName,
+    status: app.status,
+    submittedAt: app.submittedAt,
+    reviewedAt: app.reviewedAt ?? null,
+    message: app.reviewerNote ?? null,
+  };
+}
+
+async function reviewApplication(client: DataClient, caller: SchoolCaller, args: { applicationId: string; status: Application['status']; note?: string | null }): Promise<Application> {
+  const app = unwrap(await client.models.Application.get({ id: args.applicationId }), 'Application.get');
+  if (!app) throw new HandlerError('Application not found', 'NOT_FOUND');
+  assertSameSchool(caller, app.schoolId, 'Application');
+  const updated = unwrap(
+    await client.models.Application.update({
+      id: app.id,
+      status: args.status,
+      reviewerNote: args.note === undefined ? undefined : (args.note?.trim().slice(0, 2000) ?? null),
+      reviewedBy: caller.profile.fullName,
+      reviewedAt: nowIso(),
+    }),
+    'Application.update',
+  );
+  if (!updated) throw new Error('Application.update returned nothing');
+  await audit(client, {
+    schoolId: caller.schoolId,
+    actorId: caller.sub,
+    actorName: caller.profile.fullName,
+    action: 'REVIEW_APPLICATION',
+    entityType: 'Application',
+    entityId: app.id,
+    before: { status: app.status },
+    after: { status: args.status },
+  });
+  return updated;
+}
+
+// ────────────────────────────── devices ──────────────────────────────
+/**
+ * One phone = one owner. The app cannot see other users' Device rows (owner auth), so the server
+ * removes rows of the same token that belong to someone else – otherwise a previous user's bus
+ * alarms would keep ringing on this phone after it changed hands.
+ */
+async function registerDevice(client: DataClient, sub: string, args: { expoPushToken: string; platform: string; deviceName?: string | null }) {
+  const token = (args.expoPushToken ?? '').trim();
+  if (!isExpoPushToken(token)) throw new HandlerError('Invalid push token', 'VALIDATION');
+  const platform = (args.platform ?? '').slice(0, 16);
+  const deviceName = args.deviceName?.slice(0, 80) ?? undefined;
+  const rows = await listAll((nextToken) => client.models.Device.listDevicesByToken({ expoPushToken: token }, { limit: 50, nextToken }));
+  await mapLimit(
+    rows.filter((d) => d.userId !== sub),
+    5,
+    (d) => client.models.Device.delete({ id: d.id }),
+  );
+  const mine = rows.filter((d) => d.userId === sub);
+  const now = nowIso();
+  if (mine.length) {
+    await client.models.Device.update({ id: mine[0].id, lastSeenAt: now, platform, deviceName });
+    await mapLimit(mine.slice(1), 5, (d) => client.models.Device.delete({ id: d.id })); // duplicates
+  } else {
+    await client.models.Device.create({ userId: sub, expoPushToken: token, platform, deviceName, lastSeenAt: now });
+  }
+  return { ok: true, count: rows.length };
+}
+
 // ────────────────────────────── entry point ──────────────────────────────
 export const handler = async (event: AppSyncEvent<Record<string, unknown>>) => {
-  const caller = requireIdentity(event);
-  const client = await getDataClient(env);
   const args = event.arguments as never;
+  const op = opName(event);
   try {
-    switch (opName(event)) {
+    const client = await getDataClient(env);
+    // Guest-callable operations (identity pool) – no signed-in user.
+    if (op === 'submitApplication') return await submitApplication(client, args);
+    if (op === 'checkApplication') return await checkApplication(client, args);
+
+    const identity = requireIdentity(event);
+    // Account-level: also for accounts that do not belong to a school yet.
+    if (op === 'registerDevice') return await registerDevice(client, identity.sub, args);
+    const adminOps = new Set(['sendBroadcast', 'sendPush', 'reviewApplication']);
+    const caller = adminOps.has(op) ? await resolveAdmin(client, identity) : await resolveCaller(client, identity);
+    switch (op) {
       case 'sendMessage':
         return await sendMessage(client, caller, args);
       case 'openDirectConversation':
@@ -540,6 +806,8 @@ export const handler = async (event: AppSyncEvent<Record<string, unknown>>) => {
         return await reportMessage(client, caller, args);
       case 'submitFeedback':
         return await submitFeedback(client, caller, args);
+      case 'listStudentFeedback':
+        return await listStudentFeedback(client, caller, args);
       case 'sendBroadcast':
         await sendBroadcast(client, caller, args);
         return;
@@ -551,8 +819,10 @@ export const handler = async (event: AppSyncEvent<Record<string, unknown>>) => {
         return await updateHomeLocation(client, caller, args);
       case 'requestDataDeletion':
         return await requestDataDeletion(client, caller, args);
+      case 'reviewApplication':
+        return await reviewApplication(client, caller, args);
       default:
-        throw new HandlerError(`Unknown operation ${opName(event)}`);
+        throw new HandlerError(`Unknown operation ${op}`);
     }
   } catch (e) {
     if (e instanceof HandlerError) throw new Error(`[${e.code}] ${e.message}`);

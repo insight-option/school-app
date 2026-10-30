@@ -8,11 +8,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { CountBadge, Text, useTheme } from '../../ui';
 import { useSettings } from '../../features/settings';
-import { useUnreadTotal, OFFICE_USER_ID } from '../../features/messaging';
+import { useUnreadTotal, useOfficeSeat } from '../../features/messaging';
 import { useSignedUrl } from '../../lib/storage/s3';
 
 export const ADMIN_SECTIONS = [
   { name: 'dashboard', icon: 'grid-outline', active: 'grid', key: 'tabs.dashboard' },
+  { name: 'applications', icon: 'clipboard-outline', active: 'clipboard', key: 'tabs.applications' },
   { name: 'students', icon: 'people-outline', active: 'people', key: 'tabs.students' },
   { name: 'teachers', icon: 'school-outline', active: 'school', key: 'tabs.teachers' },
   { name: 'buses', icon: 'bus-outline', active: 'bus', key: 'tabs.buses' },
@@ -22,6 +23,7 @@ export const ADMIN_SECTIONS = [
   { name: 'feedback', icon: 'ribbon-outline', active: 'ribbon', key: 'tabs.feedback' },
   { name: 'broadcasts', icon: 'megaphone-outline', active: 'megaphone', key: 'tabs.broadcasts' },
   { name: 'courses', icon: 'book-outline', active: 'book', key: 'tabs.courses' },
+  { name: 'school-profile', icon: 'storefront-outline', active: 'storefront', key: 'tabs.schoolProfile' },
   { name: 'settings', icon: 'settings-outline', active: 'settings', key: 'tabs.settings' },
   { name: 'audit', icon: 'document-text-outline', active: 'document-text', key: 'tabs.audit' },
 ] as const;
@@ -52,7 +54,8 @@ function AdminTabBar({ state, emitter, navigateToTab, wide }: BottomTabBarProps 
   const insets = useSafeAreaInsets();
   const settings = useSettings();
   const logo = useSignedUrl(settings.data?.logoKey);
-  const unread = useUnreadTotal(OFFICE_USER_ID);
+  const officeSeat = useOfficeSeat();
+  const unread = useUnreadTotal(officeSeat);
   const current = state.routes[state.index]?.name;
 
   const go = (name: string) => {

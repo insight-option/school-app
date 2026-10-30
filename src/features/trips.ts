@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client, listAll, parseJson, unwrap, type BusLocation, type StopStatus, type Trip, type TripStop, type TripType } from '../lib/data/client';
 import { qk } from '../lib/query/client';
+import { useSession } from '../lib/auth/session';
 import { addDays } from '../lib/util/format';
 
 export type RouteMeta = {
@@ -16,6 +17,8 @@ export type RouteMeta = {
   stopCount?: number;
   warnings?: string[];
   origin?: { lat: number; lng: number };
+  /** Live traffic along the route polyline: [startIndex, endIndex, level] with 1 = slow, 2 = jam. */
+  traffic?: [number, number, number][];
 };
 
 export const routeMetaOf = (trip: Trip | null | undefined): RouteMeta => parseJson<RouteMeta>(trip?.routeMeta) ?? {};
@@ -37,11 +40,13 @@ export function useActiveTrip(busId: string | null | undefined, date: string) {
 }
 
 export function useTripsOnDate(date: string, enabled = true) {
+  const session = useSession();
+  const schoolId = session.schoolId;
   return useQuery({
-    queryKey: qk.tripsByDate(date),
-    enabled,
+    queryKey: [...qk.tripsByDate(date), schoolId],
+    enabled: enabled && !!schoolId,
     staleTime: 10_000,
-    queryFn: async () => listAll((nextToken) => client.models.Trip.listTripsByDate({ date }, { limit: 100, nextToken })),
+    queryFn: async () => listAll((nextToken) => client.models.Trip.listTripsBySchoolAndDate({ schoolId, date: { eq: date } }, { limit: 100, nextToken })),
   });
 }
 
@@ -239,9 +244,19 @@ export function useTestAlarm() {
 }
 
 /** Publish the bus position (driver device). Called by the location task with throttling applied upstream. */
-export async function publishBusLocation(input: { busId: string; lat: number; lng: number; heading?: number | null; speed?: number | null; accuracy?: number | null; tripId?: string | null }) {
+export async function publishBusLocation(input: {
+  busId: string;
+  schoolId?: string | null;
+  lat: number;
+  lng: number;
+  heading?: number | null;
+  speed?: number | null;
+  accuracy?: number | null;
+  tripId?: string | null;
+}) {
   const res = await client.models.BusLocation.update({
     busId: input.busId,
+    ...(input.schoolId ? { schoolId: input.schoolId } : {}),
     lat: input.lat,
     lng: input.lng,
     heading: input.heading ?? undefined,

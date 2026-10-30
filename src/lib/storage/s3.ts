@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { fetchAuthSession } from 'aws-amplify/auth';
 import { getUrl, remove, uploadData } from 'aws-amplify/storage';
 import { kv } from './mmkv';
 import './../amplify';
@@ -76,7 +77,19 @@ export function fileExtension(nameOrUri: string, fallback = 'bin'): string {
 }
 
 export function randomId(): string {
-  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  // 128-bit random ids: storage keys are only protected by being unguessable (no listing allowed).
+  const bytes = new Uint8Array(16);
+  const c = (globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } }).crypto;
+  if (c?.getRandomValues) c.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Cognito identity id of this device's user – the owner segment of avatars/ and school-media/ keys. */
+export async function myIdentityId(): Promise<string> {
+  const session = await fetchAuthSession();
+  if (!session.identityId) throw new Error('Not signed in');
+  return session.identityId;
 }
 
 export const MAX_ATTACHMENT_MB = 50;

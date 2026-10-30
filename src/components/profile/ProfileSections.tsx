@@ -12,7 +12,7 @@ import { useTestAlarm } from '../../features/trips';
 import { setAppLanguage, type AppLanguage } from '../../lib/i18n';
 import { useAppearanceStore, type AppearanceMode } from '../../lib/appearance';
 import { getPushPermissionStatus, isPushSupported, openSystemNotificationSettings, registerDeviceForPush, requestPushPermission } from '../../lib/push/notifications';
-import { uploadFile, randomId } from '../../lib/storage/s3';
+import { uploadFile, randomId, myIdentityId } from '../../lib/storage/s3';
 import { ImageManipulator, SaveFactor } from './imageHelpers';
 import { queryClient } from '../../lib/query/client';
 import Constants from 'expo-constants';
@@ -43,7 +43,7 @@ export function ProfileHeader({ subtitle }: { subtitle?: string | null }) {
         ref.release();
         uri = out.uri;
       }
-      const key = `avatars/${session.userId}/${randomId()}.jpg`;
+      const key = `avatars/${await myIdentityId()}/${randomId()}.jpg`;
       await uploadFile(key, asset.file ?? uri, 'image/jpeg');
       await update.mutateAsync({ avatarKey: key });
     } catch (e) {

@@ -3,15 +3,40 @@ import { Platform, StyleSheet, View } from 'react-native';
 import RNMapView, { Marker, Polyline, PROVIDER_GOOGLE, type MapPressEvent, type Region as RNRegion } from 'react-native-maps';
 import type { MapHandle, MapMarker, MapProps } from './types';
 import { BusMarkerView, HomeMarkerView, PinMarkerView, SchoolMarkerView, StudentMarkerView } from './markers';
+import { DARK_MAP_STYLE, LIGHT_MAP_STYLE } from './mapStyle';
 import { regionFor } from '../../lib/geo';
 import { IS_EXPO_GO } from '../../lib/runtime';
 
 // Expo Go on iOS has no Google Maps SDK – fall back to Apple Maps there; everywhere else use Google.
 const PROVIDER = IS_EXPO_GO && Platform.OS === 'ios' ? undefined : PROVIDER_GOOGLE;
 
+/** Apple Maps has no zoom levels – convert to a camera altitude in metres. */
+const altitudeForZoom = (zoom: number) => Math.max(150, 40_000_000 / 2 ** zoom);
+
 /** Native map (Google provider on Android & iOS). Same props as MapView.web.tsx. */
 export const MapView = forwardRef<MapHandle, MapProps>(function MapView(
-  { style, initialRegion, markers = [], polyline, polylineColor = '#2563EB', pin, onPinChange, onPress, onUserGesture, showsUserLocation, showsTraffic, onReady, padding, testID },
+  {
+    style,
+    initialRegion,
+    markers = [],
+    polyline,
+    polylineColor = '#2563EB',
+    routeOutlineColor,
+    polylineWidth = 6,
+    routeSegments,
+    mapType = 'standard',
+    themed,
+    dark,
+    pin,
+    onPinChange,
+    onPress,
+    onUserGesture,
+    showsUserLocation,
+    showsTraffic,
+    onReady,
+    padding,
+    testID,
+  },
   ref,
 ) {
   const mapRef = useRef<RNMapView>(null);
@@ -35,6 +60,19 @@ export const MapView = forwardRef<MapHandle, MapProps>(function MapView(
           { edgePadding: { top: pad + (padding?.top ?? 0), right: pad, bottom: pad + (padding?.bottom ?? 0), left: pad }, animated: true },
         );
       },
+      follow: (p, opts) => {
+        const zoom = opts?.zoom ?? 17;
+        mapRef.current?.animateCamera(
+          {
+            center: { latitude: p.lat, longitude: p.lng },
+            heading: opts?.heading ?? undefined,
+            pitch: opts?.pitch ?? 0,
+            zoom,
+            altitude: altitudeForZoom(zoom),
+          },
+          { duration: 650 },
+        );
+      },
     }),
     [padding],
   );
@@ -47,6 +85,9 @@ export const MapView = forwardRef<MapHandle, MapProps>(function MapView(
     [onPress],
   );
 
+  const coords = useMemo(() => (polyline && polyline.length > 1 ? polyline.map((p) => ({ latitude: p.lat, longitude: p.lng })) : null), [polyline]);
+  const customStyle = PROVIDER === PROVIDER_GOOGLE && themed && mapType === 'standard' ? (dark ? DARK_MAP_STYLE : LIGHT_MAP_STYLE) : undefined;
+
   return (
     <View style={[styles.fill, style]} testID={testID}>
       <RNMapView
@@ -54,17 +95,37 @@ export const MapView = forwardRef<MapHandle, MapProps>(function MapView(
         provider={PROVIDER}
         style={styles.fill}
         initialRegion={region}
+        mapType={mapType}
+        customMapStyle={customStyle}
         showsUserLocation={showsUserLocation}
         showsMyLocationButton={false}
         showsTraffic={showsTraffic}
+        showsBuildings
         showsCompass={false}
+        showsPointsOfInterests={!themed}
         toolbarEnabled={false}
+        pitchEnabled
+        rotateEnabled
         onPress={handlePress}
         onPanDrag={onUserGesture}
         onMapReady={onReady}
         mapPadding={padding ? { top: padding.top ?? 0, right: padding.right ?? 0, bottom: padding.bottom ?? 0, left: padding.left ?? 0 } : undefined}
       >
-        {polyline && polyline.length > 1 ? <Polyline coordinates={polyline.map((p) => ({ latitude: p.lat, longitude: p.lng }))} strokeColor={polylineColor} strokeWidth={5} /> : null}
+        {coords && routeOutlineColor ? <Polyline coordinates={coords} strokeColor={routeOutlineColor} strokeWidth={polylineWidth + 4} lineCap="round" lineJoin="round" zIndex={1} /> : null}
+        {coords ? <Polyline coordinates={coords} strokeColor={polylineColor} strokeWidth={polylineWidth} lineCap="round" lineJoin="round" zIndex={2} /> : null}
+        {routeSegments?.map((s, i) =>
+          s.points.length > 1 ? (
+            <Polyline
+              key={`seg-${i}-${s.points.length}`}
+              coordinates={s.points.map((p) => ({ latitude: p.lat, longitude: p.lng }))}
+              strokeColor={s.color}
+              strokeWidth={polylineWidth}
+              lineCap="round"
+              lineJoin="round"
+              zIndex={3}
+            />
+          ) : null,
+        )}
         {markers.map((m) => (
           <NativeMarker key={m.id} marker={m} />
         ))}

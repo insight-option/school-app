@@ -73,18 +73,33 @@ export function useProfilesByBus(busId: string | null | undefined) {
   });
 }
 
-/** Paginated list of all profiles with a role (admin lists). */
+type ProfilePage = { items: Profile[]; nextToken: string | null };
+
+/**
+ * Paginated list of the school's profiles with a role (admin lists). Large pages keep most schools to
+ * one request; the loaded pages are presented as one alphabetical page.
+ */
 export function useProfilesByRole(role: Role, enabled = true) {
+  const session = useSession();
+  const schoolId = session.schoolId;
   return useInfiniteQuery({
-    queryKey: qk.profilesByRole(role),
-    enabled,
+    queryKey: [...qk.profilesByRole(role), schoolId],
+    enabled: enabled && !!schoolId,
     initialPageParam: undefined as string | null | undefined,
-    queryFn: async ({ pageParam }) => {
-      const res = await client.models.Profile.listProfilesByRole({ role }, { limit: 50, nextToken: pageParam ?? undefined, selectionSet: [...PROFILE_SELECTION] });
+    queryFn: async ({ pageParam }): Promise<ProfilePage> => {
+      const res = await client.models.Profile.listProfilesBySchoolAndRole(
+        { schoolId, role: { eq: role } },
+        { limit: 200, nextToken: pageParam ?? undefined, selectionSet: [...PROFILE_SELECTION] },
+      );
       unwrap(res, 'profiles');
       return { items: res.data as unknown as Profile[], nextToken: res.nextToken ?? null };
     },
     getNextPageParam: (last) => last.nextToken ?? undefined,
+    select: (data) => {
+      const items = data.pages.flatMap((p) => p.items).sort((a, b) => a.fullName.localeCompare(b.fullName));
+      const last = data.pages[data.pages.length - 1];
+      return { pageParams: data.pageParams, pages: [{ items, nextToken: last?.nextToken ?? null }] };
+    },
   });
 }
 

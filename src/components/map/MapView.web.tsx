@@ -31,10 +31,28 @@ export const MapView = forwardRef<MapHandle, MapProps>(function MapView(props, r
   );
 });
 
-function InnerMap({ handleRef, style, initialRegion, markers = [], polyline, polylineColor = '#2563EB', pin, onPinChange, onPress, onUserGesture, showsTraffic, onReady, testID }: MapProps & { handleRef: React.ForwardedRef<MapHandle> }) {
+function InnerMap({
+  handleRef,
+  style,
+  initialRegion,
+  markers = [],
+  polyline,
+  polylineColor = '#2563EB',
+  routeOutlineColor,
+  polylineWidth = 6,
+  routeSegments,
+  mapType = 'standard',
+  pin,
+  onPinChange,
+  onPress,
+  onUserGesture,
+  showsTraffic,
+  onReady,
+  testID,
+}: MapProps & { handleRef: React.ForwardedRef<MapHandle> }) {
   const map = useMap();
   const readyRef = useRef(false);
-  const polyRef = useRef<google.maps.Polyline | null>(null);
+  const polyRef = useRef<google.maps.Polyline[]>([]);
   const trafficRef = useRef<google.maps.TrafficLayer | null>(null);
 
   const region = useMemo(() => initialRegion ?? (markers.length ? regionFor(markers) : { lat: 24.7136, lng: 46.6753, latitudeDelta: 0.1, longitudeDelta: 0.1 }), [initialRegion, markers]);
@@ -52,6 +70,14 @@ function InnerMap({ handleRef, style, initialRegion, markers = [], polyline, pol
         points.forEach((p) => b.extend({ lat: p.lat, lng: p.lng }));
         map.fitBounds(b, pad);
       },
+      follow: (p, opts) => {
+        if (!map) return;
+        map.panTo({ lat: p.lat, lng: p.lng });
+        map.setZoom(opts?.zoom ?? 17);
+        // Heading/tilt only apply to vector maps; harmless otherwise.
+        if (opts?.heading != null) map.setHeading(opts.heading);
+        if (opts?.pitch != null) map.setTilt(opts.pitch);
+      },
     }),
     [map],
   );
@@ -64,12 +90,24 @@ function InnerMap({ handleRef, style, initialRegion, markers = [], polyline, pol
 
   useEffect(() => {
     if (!map) return;
-    polyRef.current?.setMap(null);
+    polyRef.current.forEach((l) => l.setMap(null));
+    const lines: google.maps.Polyline[] = [];
+    const path = (pts: { lat: number; lng: number }[]) => pts.map((p) => ({ lat: p.lat, lng: p.lng }));
     if (polyline && polyline.length > 1) {
-      polyRef.current = new google.maps.Polyline({ path: polyline.map((p) => ({ lat: p.lat, lng: p.lng })), strokeColor: polylineColor, strokeWeight: 5, strokeOpacity: 0.9, map });
+      if (routeOutlineColor) lines.push(new google.maps.Polyline({ path: path(polyline), strokeColor: routeOutlineColor, strokeWeight: polylineWidth + 4, strokeOpacity: 1, zIndex: 1, map }));
+      lines.push(new google.maps.Polyline({ path: path(polyline), strokeColor: polylineColor, strokeWeight: polylineWidth, strokeOpacity: 1, zIndex: 2, map }));
     }
-    return () => polyRef.current?.setMap(null);
-  }, [map, polyline, polylineColor]);
+    for (const seg of routeSegments ?? []) {
+      if (seg.points.length > 1) lines.push(new google.maps.Polyline({ path: path(seg.points), strokeColor: seg.color, strokeWeight: polylineWidth, strokeOpacity: 1, zIndex: 3, map }));
+    }
+    polyRef.current = lines;
+    return () => lines.forEach((l) => l.setMap(null));
+  }, [map, polyline, polylineColor, routeOutlineColor, polylineWidth, routeSegments]);
+
+  useEffect(() => {
+    if (!map) return;
+    map.setMapTypeId(mapType === 'satellite' ? 'satellite' : mapType === 'hybrid' ? 'hybrid' : 'roadmap');
+  }, [map, mapType]);
 
   useEffect(() => {
     if (!map) return;

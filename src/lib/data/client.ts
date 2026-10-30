@@ -2,8 +2,14 @@ import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '../../../amplify/data/resource';
 import '../amplify';
 
-/** Typed Amplify Data client (Cognito user-pool auth by default). */
+/** Typed Amplify Data client (Cognito user-pool auth; requests carry the ID token, see lib/amplify.ts). */
 export const client = generateClient<Schema>({ authMode: 'userPool' });
+
+/** Guest client (Cognito identity pool) for the public school directory, applications and alarm links. */
+export const publicClient = generateClient<Schema>({ authMode: 'identityPool' });
+
+/** Signed-in users must use the user-pool client; guests the identity-pool one. */
+export const clientFor = (signedIn: boolean) => (signedIn ? client : publicClient);
 
 export type { Schema };
 export type Profile = Schema['Profile']['type'];
@@ -26,6 +32,10 @@ export type CourseLesson = Schema['CourseLesson']['type'];
 export type AuditLog = Schema['AuditLog']['type'];
 export type ImportJob = Schema['ImportJob']['type'];
 export type MessageReport = Schema['MessageReport']['type'];
+export type School = Schema['School']['type'];
+export type Application = Schema['Application']['type'];
+export type ApplicationStatus = Schema['ApplicationStatus']['type'];
+export type GenderPolicy = Schema['GenderPolicy']['type'];
 
 export type Role = Schema['Role']['type'];
 export type TripType = Schema['TripType']['type'];

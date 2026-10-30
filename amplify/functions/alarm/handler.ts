@@ -1,4 +1,5 @@
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
+import { ACK_TTL_SECONDS, ackToken, verifyAckToken } from '../shared/ackToken';
 import type { Schema } from '../../data/resource';
 import { getDataClient, getSettings, nowIso, type DataClient, type DataEnv, unwrap } from '../shared/data';
 import { t } from '../shared/i18n';
@@ -6,7 +7,7 @@ import { notifyUsers } from '../shared/notify';
 import { alarmPushPayload, pushToUsers } from '../shared/push';
 import { HandlerError, opName, requireIdentity, type AppSyncEvent, type Caller } from '../shared/types';
 
-type Env = DataEnv & { ALARM_STATE_MACHINE_ARN?: string };
+type Env = DataEnv & { ALARM_STATE_MACHINE_ARN?: string; ALARM_ACK_SECRET?: string };
 const env = process.env as unknown as Env;
 const sfn = new SFNClient({});
 
@@ -23,6 +24,11 @@ export type AlarmRepeatEvent = {
 };
 
 const ALARM_RATE_LIMIT_MS = 15_000;
+function ackFields(tripStopId: string): Record<string, unknown> {
+  if (!env.ALARM_ACK_SECRET) return {};
+  const ackExpires = Math.floor(Date.now() / 1000) + ACK_TTL_SECONDS;
+  return { ackExpires, ackToken: ackToken(env.ALARM_ACK_SECRET, tripStopId, ackExpires) };
+}
 
 async function alarmContext(client: DataClient, stop: TripStop) {
   const trip = await client.models.Trip.get({ id: stop.tripId });
@@ -44,6 +50,8 @@ function payloadFor(stop: TripStop, ctx: Awaited<ReturnType<typeof alarmContext>
       driverName: ctx.trip?.driverName ?? '',
       plate: ctx.trip?.busPlate ?? '',
       etaSeconds: stop.etaSeconds ?? null,
+      studentName: stop.studentName,
+      ...ackFields(stop.id),
     },
     { title: s.alarmTitle, body: s.alarmBody },
   );
@@ -53,11 +61,11 @@ async function alarmStudent(client: DataClient, caller: Caller, args: { tripStop
   const stop = unwrap(await client.models.TripStop.get({ id: args.tripStopId }), 'TripStop.get');
   const ctx = await alarmContext(client, stop);
   if (!ctx.trip) throw new HandlerError('Trip not found', 'NOT_FOUND');
-  if (!caller.isAdmin) {
-    const profile = await client.models.Profile.get({ userId: caller.sub });
-    if (!profile.data || profile.data.role !== 'DRIVER' || profile.data.busId !== ctx.trip.busId) {
-      throw new HandlerError('Only the driver of this bus can alarm', 'FORBIDDEN');
-    }
+  const me = (await client.models.Profile.get({ userId: caller.sub })).data;
+  if (!me || me.isActive === false || me.schoolId !== ctx.trip.schoolId) throw new HandlerError('Trip not found', 'NOT_FOUND');
+  const isOffice = caller.isAdmin && me.role === 'ADMIN';
+  if (!isOffice && (me.role !== 'DRIVER' || me.busId !== ctx.trip.busId)) {
+    throw new HandlerError('Only the driver of this bus can alarm', 'FORBIDDEN');
   }
   if (ctx.trip.status !== 'ACTIVE') throw new HandlerError('Trip is not active', 'CONFLICT');
   if (['BOARDED', 'DROPPED', 'ABSENT'].includes(stop.status)) throw new HandlerError(`Cannot alarm a stop with status ${stop.status}`, 'CONFLICT');
@@ -120,9 +128,28 @@ async function alarmRepeat(client: DataClient, event: AlarmRepeatEvent): Promise
 
 async function acknowledgeAlarm(client: DataClient, caller: Caller, args: { tripStopId: string }): Promise<TripStop> {
   const stop = unwrap(await client.models.TripStop.get({ id: args.tripStopId }), 'TripStop.get');
-  if (!caller.isAdmin && stop.studentId !== caller.sub) throw new HandlerError('Not your stop', 'FORBIDDEN');
+  if (!stop) throw new HandlerError('Stop not found', 'NOT_FOUND');
+  if (stop.studentId !== caller.sub) {
+    const me = (await client.models.Profile.get({ userId: caller.sub })).data;
+    const trip = (await client.models.Trip.get({ id: stop.tripId })).data;
+    if (!caller.isAdmin || !me || me.role !== 'ADMIN' || !trip || me.schoolId !== trip.schoolId) throw new HandlerError('Not your stop', 'FORBIDDEN');
+  }
   if (stop.status !== 'ALARMED') return stop;
   return unwrap(await client.models.TripStop.update({ id: stop.id, status: 'ACKNOWLEDGED', acknowledgedAt: nowIso() }), 'TripStop.update');
+}
+
+/** "I'm coming" from a phone that is signed out: the push carried a signed, expiring token. */
+async function acknowledgeAlarmWithToken(client: DataClient, args: { tripStopId: string; expires: number; token: string }) {
+  if (!verifyAckToken(env.ALARM_ACK_SECRET, args.tripStopId, args.expires, args.token)) {
+    throw new HandlerError('This alarm link has expired. Sign in to answer the driver.', 'FORBIDDEN');
+  }
+  const stop = (await client.models.TripStop.get({ id: args.tripStopId })).data;
+  if (!stop) throw new HandlerError('Stop not found', 'NOT_FOUND');
+  if (stop.status === 'ALARMED') {
+    await client.models.TripStop.update({ id: stop.id, status: 'ACKNOWLEDGED', acknowledgedAt: nowIso() });
+    return { ok: true, message: 'ACKNOWLEDGED' };
+  }
+  return { ok: true, message: stop.status };
 }
 
 async function testAlarm(client: DataClient, caller: Caller) {
@@ -139,9 +166,10 @@ export const handler = async (event: AppSyncEvent<Record<string, unknown>> | Ala
     return alarmRepeat(client, event);
   }
   const appsync = event as AppSyncEvent<Record<string, unknown>>;
-  const caller = requireIdentity(appsync);
   const args = appsync.arguments as never;
   try {
+    if (opName(appsync) === 'acknowledgeAlarmWithToken') return await acknowledgeAlarmWithToken(client, args);
+    const caller = requireIdentity(appsync);
     switch (opName(appsync)) {
       case 'alarmStudent':
         return await alarmStudent(client, caller, args);

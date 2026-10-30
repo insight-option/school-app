@@ -12,6 +12,7 @@ const env = process.env as unknown as Env;
 type Trip = Schema['Trip']['type'];
 type TripStop = Schema['TripStop']['type'];
 type Profile = Schema['Profile']['type'];
+type Bus = Schema['Bus']['type'];
 type StopStatus = Schema['StopStatus']['type'];
 type TripType = Schema['TripType']['type'];
 
@@ -41,12 +42,19 @@ async function getCallerProfile(client: DataClient, caller: Caller): Promise<Pro
   return res.data;
 }
 
-async function requireDriverOfBus(client: DataClient, caller: Caller, busId: string): Promise<Profile | null> {
-  if (caller.isAdmin) return getCallerProfile(client, caller);
+/**
+ * The bus's own driver, or an office admin of the bus's school. Buses of other schools are reported as
+ * missing so their existence is never revealed.
+ */
+async function requireDriverOfBus(client: DataClient, caller: Caller, busId: string): Promise<{ profile: Profile; bus: Bus }> {
   const profile = await getCallerProfile(client, caller);
-  if (!profile || profile.role !== 'DRIVER' || profile.busId !== busId) throw new HandlerError('Only the driver of this bus can do that', 'FORBIDDEN');
+  if (!profile) throw new HandlerError('Your account is not linked to a school yet.', 'FORBIDDEN');
   if (profile.isActive === false) throw new HandlerError('Account disabled', 'FORBIDDEN');
-  return profile;
+  const bus = (await client.models.Bus.get({ busId })).data;
+  if (!bus || bus.schoolId !== profile.schoolId) throw new HandlerError('Bus not found', 'NOT_FOUND');
+  if (caller.isAdmin && profile.role === 'ADMIN') return { profile, bus };
+  if (profile.role !== 'DRIVER' || profile.busId !== busId) throw new HandlerError('Only the driver of this bus can do that', 'FORBIDDEN');
+  return { profile, bus };
 }
 
 async function loadStops(client: DataClient, tripId: string): Promise<TripStop[]> {
@@ -74,9 +82,9 @@ async function busOrigin(client: DataClient, trip: Trip, hint?: LatLng | null): 
 }
 
 /** Record the driver's position so the live map and the next route start from the right place. */
-async function upsertBusLocation(client: DataClient, busId: string, driverUserId: string, pos: LatLng, tripId: string | null) {
+async function upsertBusLocation(client: DataClient, busId: string, schoolId: string, driverUserId: string, pos: LatLng, tripId: string | null) {
   const existing = await client.models.BusLocation.get({ busId });
-  const base = { busId, lat: pos.lat, lng: pos.lng, updatedAt: nowIso(), tripId };
+  const base = { busId, schoolId, lat: pos.lat, lng: pos.lng, updatedAt: nowIso(), tripId };
   if (existing.data) await client.models.BusLocation.update(base);
   else await client.models.BusLocation.create({ ...base, driverUserId, heading: 0, speed: 0, accuracy: 0 });
 }
@@ -132,6 +140,7 @@ async function recompute(
     stopCount: plan.stops.length,
     reason: opts.reason,
     warnings: plan.warnings,
+    traffic: plan.traffic,
     origin,
   };
   return unwrap(await client.models.Trip.update({ id: trip.id, routePolyline: plan.polyline, routeMeta: JSON.stringify(routeMeta) }), 'Trip.update');
@@ -139,8 +148,7 @@ async function recompute(
 
 // ────────────────────────────── operations ──────────────────────────────
 async function startTrip(client: DataClient, caller: Caller, args: { busId: string; type: TripType; lat?: number | null; lng?: number | null }): Promise<Trip> {
-  const profile = await requireDriverOfBus(client, caller, args.busId);
-  const bus = unwrap(await client.models.Bus.get({ busId: args.busId }), 'Bus.get');
+  const { profile, bus } = await requireDriverOfBus(client, caller, args.busId);
   const settings = await getSettings(client, bus.schoolId);
   const date = todayInTimezone(settings?.timezone);
   const here = validLatLng(args.lat, args.lng);
@@ -189,6 +197,7 @@ async function startTrip(client: DataClient, caller: Caller, args: { busId: stri
     await client.models.TripStop.create({
       tripId: trip.id,
       busId: args.busId,
+      schoolId: bus.schoolId,
       date,
       studentId: s.userId,
       studentName: s.fullName,
@@ -203,7 +212,7 @@ async function startTrip(client: DataClient, caller: Caller, args: { busId: stri
     });
   });
   await client.models.Trip.update({ id: trip.id, stopCount: riders.length });
-  if (here) await upsertBusLocation(client, args.busId, bus.driverUserId ?? caller.sub, here, trip.id);
+  if (here) await upsertBusLocation(client, args.busId, bus.schoolId, bus.driverUserId ?? caller.sub, here, trip.id);
   else if (loc.data) await client.models.BusLocation.update({ busId: args.busId, tripId: trip.id });
 
   const routed = await recompute(client, { ...trip, stopCount: riders.length }, { force: true, reason: 'start', origin: here });
@@ -237,14 +246,15 @@ async function computeTripRoute(
   // Drivers, admins and the students of this bus may request a recompute (students after toggling
   // their day status). The 30 s rate limit keeps API cost bounded whoever calls.
   let isDriver = false;
-  if (!caller.isAdmin) {
-    const profile = await getCallerProfile(client, caller);
-    if (!profile || profile.busId !== trip.busId) throw new HandlerError('Not allowed', 'FORBIDDEN');
+  const profile = await getCallerProfile(client, caller);
+  if (!profile || profile.schoolId !== trip.schoolId) throw new HandlerError('Trip not found', 'NOT_FOUND');
+  if (!(caller.isAdmin && profile.role === 'ADMIN')) {
+    if (profile.busId !== trip.busId) throw new HandlerError('Not allowed', 'FORBIDDEN');
     isDriver = profile.role === 'DRIVER';
   }
   // Only the driver's own device knows where the bus is; ignore positions sent by anyone else.
   const here = isDriver || caller.isAdmin ? validLatLng(args.lat, args.lng) : null;
-  if (here && isDriver && trip.status === 'ACTIVE') await upsertBusLocation(client, trip.busId, caller.sub, here, trip.id);
+  if (here && isDriver && trip.status === 'ACTIVE') await upsertBusLocation(client, trip.busId, trip.schoolId, caller.sub, here, trip.id);
   return recompute(client, trip, { force: !!args.force && caller.isAdmin, reason: caller.isAdmin ? 'admin' : 'request', origin: here });
 }
 

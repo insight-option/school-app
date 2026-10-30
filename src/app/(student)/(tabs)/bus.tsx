@@ -19,7 +19,8 @@ import { addDays, formatDate, formatEta, formatTime, todayIn } from '../../../li
 import { callPhone } from '../../../lib/util/device';
 import { useOpenDirectConversation } from '../../../features/messaging';
 import { KV_KEYS, kv } from '../../../lib/storage/mmkv';
-import { isPushSupported } from '../../../lib/push/notifications';
+import { getPushPermissionStatus, isPushSupported } from '../../../lib/push/notifications';
+import { NotificationBanner } from '../../../components/push/NotificationBanner';
 import { STOP_TONES } from '../../../components/StopTimeline';
 
 type TripUiState = 'noBus' | 'none' | 'onTheWay' | 'near' | 'alarmed' | 'boarded' | 'dropped' | 'completed' | 'skipped' | 'absent';
@@ -54,9 +55,17 @@ export default function BusTab() {
       return () => setFocused(false);
     }, []),
   );
-  // One-time notification onboarding after the home location (only if never shown).
+  // Ask for notifications whenever the OS has never asked yet (the driver's alarm needs them).
+  // "Not now" is remembered for this run so the screen does not reappear on every tab switch.
   useEffect(() => {
-    if (isPushSupported && !kv.getString(KV_KEYS.onboardingNotif)) router.push('/(student)/onboarding/notifications');
+    if (!isPushSupported || kv.getString(KV_KEYS.onboardingNotif)) return;
+    let alive = true;
+    void getPushPermissionStatus().then((s) => {
+      if (alive && s === 'undetermined') router.push('/(student)/onboarding/notifications');
+    });
+    return () => {
+      alive = false;
+    };
   }, [router]);
 
   useBusLocationSubscription(me.data?.busId, focused && trip?.status === 'ACTIVE');
@@ -164,6 +173,7 @@ export default function BusTab() {
     <Screen padded={false} title={t('tabs.bus')} subtitle={settings.data?.name} right={<Button size="sm" variant="ghost" icon="notifications-outline" title="" onPress={() => router.push('/notifications')} />}>
       <ScrollView contentContainerStyle={{ paddingBottom: theme.spacing.xxxl }}>
         <View style={{ padding: theme.spacing.lg, gap: theme.spacing.md }}>
+          <NotificationBanner />
           {loading ? (
             <Skeleton height={120} radius={16} />
           ) : (

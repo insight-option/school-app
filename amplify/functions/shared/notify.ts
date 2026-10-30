@@ -2,6 +2,7 @@ import type { Schema } from '../../data/resource';
 import type { DataClient } from './data';
 import { listAll, mapLimit, nowIso } from './data';
 import { pushToUsers, type PushPayload } from './push';
+import { isOfficeSeat } from './tenancy';
 
 export type NotificationType = Schema['Notification']['type']['type'];
 
@@ -19,7 +20,7 @@ export async function notifyUsers(
     createInbox?: boolean;
   },
 ): Promise<{ inbox: number; pushed: number }> {
-  const userIds = Array.from(new Set(opts.userIds.filter((u) => u && u !== 'OFFICE')));
+  const userIds = Array.from(new Set(opts.userIds.filter((u) => u && !isOfficeSeat(u))));
   if (!userIds.length) return { inbox: 0, pushed: 0 };
   let inbox = 0;
   if (opts.createInbox !== false) {
@@ -48,8 +49,11 @@ export async function notifyUsers(
   return { inbox, pushed };
 }
 
-/** All active admins of a school (the "office"). */
-export async function getAdminUserIds(client: DataClient): Promise<string[]> {
-  const admins = await listAll((nextToken) => client.models.Profile.listProfilesByRole({ role: 'ADMIN' }, { limit: 100, nextToken }));
+/** All active office admins of one school. */
+export async function getAdminUserIds(client: DataClient, schoolId: string): Promise<string[]> {
+  if (!schoolId) return [];
+  const admins = await listAll((nextToken) =>
+    client.models.Profile.listProfilesBySchoolAndRole({ schoolId, role: { eq: 'ADMIN' } }, { limit: 100, nextToken }),
+  );
   return admins.filter((p) => p.isActive !== false).map((p) => p.userId);
 }

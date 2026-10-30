@@ -66,6 +66,7 @@ export const KV_KEYS = {
   lastBusPublish: 'driver.lastBusPublish',
   activeTrip: 'driver.activeTrip',
   driverBusId: 'driver.busId',
+  driverSchoolId: 'driver.schoolId',
   pushToken: 'push.token',
   onboardingNotif: 'onboarding.notifications',
   colorScheme: 'settings.colorScheme',
