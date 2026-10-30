@@ -47,8 +47,12 @@ export function useSettingsSubscription() {
   const enabled = session.status === 'signedIn' && !!schoolId;
   useEffect(() => {
     if (!enabled) return;
-    const sub = client.models.SchoolSettings.onUpdate({ filter: { schoolId: { eq: schoolId } } }).subscribe({
-      next: (s) => qc.setQueryData(qk.settings(schoolId), s),
+    // No filter: schoolId is the auth field, so AppSync already limits events to the caller's school
+    // and rejects a second filter on it ("same fieldName multiple time").
+    const sub = client.models.SchoolSettings.onUpdate().subscribe({
+      next: (s) => {
+        if (s.schoolId === schoolId) qc.setQueryData(qk.settings(schoolId), s);
+      },
       error: (e) => console.warn('settings subscription', e),
     });
     return () => sub.unsubscribe();

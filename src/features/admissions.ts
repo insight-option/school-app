@@ -22,15 +22,19 @@ export function useApplications(enabled = true) {
   });
   useEffect(() => {
     if (!enabled || !schoolId || session.role !== 'ADMIN') return;
-    const upsert = (a: Application) =>
+    const upsert = (a: Application) => {
+      if (a.schoolId !== schoolId) return;
       qc.setQueryData<Application[]>(applicationsKey(schoolId), (old) => {
         const list = old ?? [];
         const i = list.findIndex((x) => x.id === a.id);
         const next = i >= 0 ? list.map((x) => (x.id === a.id ? a : x)) : [a, ...list];
         return next.sort((x, y) => y.submittedAt.localeCompare(x.submittedAt));
       });
-    const s1 = client.models.Application.onCreate({ filter: { schoolId: { eq: schoolId } } }).subscribe({ next: upsert, error: (e) => console.warn('applications sub', e) });
-    const s2 = client.models.Application.onUpdate({ filter: { schoolId: { eq: schoolId } } }).subscribe({ next: upsert, error: (e) => console.warn('applications sub', e) });
+    };
+    // No filter: schoolId is the admin-group field, so AppSync already limits events to the
+    // caller's school and does not accept it in subscription filters.
+    const s1 = client.models.Application.onCreate().subscribe({ next: upsert, error: (e) => console.warn('applications sub', e) });
+    const s2 = client.models.Application.onUpdate().subscribe({ next: upsert, error: (e) => console.warn('applications sub', e) });
     return () => {
       s1.unsubscribe();
       s2.unsubscribe();

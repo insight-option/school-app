@@ -159,8 +159,11 @@ export function useNotificationSubscription(userId: string | null | undefined, e
   const qc = useQueryClient();
   useEffect(() => {
     if (!userId || !enabled) return;
-    const sub = client.models.Notification.onCreate({ filter: { userId: { eq: userId } } }).subscribe({
+    // No filter: userId is the owner field, so AppSync already delivers only the caller's rows and
+    // rejects a second filter on it.
+    const sub = client.models.Notification.onCreate().subscribe({
       next: (n) =>
+        n.userId === userId &&
         qc.setQueryData<{ pages: { items: Notification[]; nextToken: string | null }[]; pageParams: unknown[] }>(qk.notifications(userId), (old) => {
           if (!old) return { pages: [{ items: [n], nextToken: null }], pageParams: [undefined] };
           const [first, ...rest] = old.pages;
