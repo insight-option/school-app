@@ -1,6 +1,6 @@
 import 'react-native-get-random-values';
 import '../lib/amplify';
-import '../lib/i18n';
+import { isRTL, type AppLanguage } from '../lib/i18n';
 import '../lib/query/mutationDefaults';
 import '../lib/location/busLocationTask';
 import React, { useEffect, useMemo, useRef } from 'react';
@@ -79,7 +79,10 @@ function ThemedApp() {
   const settings = useSettings();
   useSettingsSubscription();
   const theme = useMemo(() => buildTheme(scheme, settings.data?.primaryColor), [scheme, settings.data?.primaryColor]);
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  // react-native-web resolves start/end and left/right from the nearest `dir` prop, not the page's
+  // <html dir>, so Arabic needs it on the root view (native flips via I18nManager instead).
+  const webDir = Platform.OS === 'web' ? ({ dir: isRTL(i18n.language as AppLanguage) ? 'rtl' : 'ltr' } as object) : null;
 
   // Android channels (needed before the first token request on Android 13+).
   useEffect(() => {
@@ -103,7 +106,7 @@ function ThemedApp() {
 
   return (
     <ThemeContext.Provider value={theme}>
-      <View style={[styles.fill, { backgroundColor: theme.colors.background }]}>
+      <View {...webDir} style={[styles.fill, { backgroundColor: theme.colors.background }]}>
         <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
         <OfflineBanner />
         <RootNavigator />
