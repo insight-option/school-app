@@ -104,6 +104,21 @@ export function websiteUrl(raw: string | null | undefined): string | null {
   return /^https?:\/\//i.test(v) ? v : `https://${v}`;
 }
 
+const GENERIC_WORDS = new Set(['school', 'schools', 'academy', 'international', 'college', 'institute', 'the', 'of', 'and', 'مدرسة', 'مدارس', 'أكاديمية', 'اكاديمية', 'الدولية', 'العالمية']);
+
+/** Logo placeholder: "Al Noor International School" → "AN", "Riverside Academy" → "RA", "مدرسة الأمل" → "أ". */
+export function schoolInitials(name: string | null | undefined): string {
+  const words = (name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '?';
+  const significant = words.filter((w) => !GENERIC_WORDS.has(w.toLowerCase()));
+  const first = significant[0] ?? words[0];
+  // Arabic letters join when written side by side, so one letter (without the article) reads best.
+  if (/[؀-ۿ]/.test(first)) return first.replace(/^ال(?=\S{2,})/, '')[0];
+  const parts = significant.length >= 2 ? significant : words;
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 /** Splits "a, b; c\nd" into a clean list (used by the profile editor for chips/lists). */
 export function splitList(raw: string | null | undefined, max = 30): string[] {
   if (!raw) return [];

@@ -10,7 +10,7 @@ import {
   officeSeatId,
 } from '../amplify/functions/shared/tenancy';
 import { ackToken, verifyAckToken } from '../amplify/functions/shared/ackToken';
-import { acceptsApplications, feeRange, filterSchools, splitList, topCurricula, websiteUrl, type DirectorySchool } from '../src/lib/directory';
+import { acceptsApplications, feeRange, filterSchools, schoolInitials, splitList, topCurricula, websiteUrl, type DirectorySchool } from '../src/lib/directory';
 import { cleanApplication, formatDobInput, validateApplication } from '../src/lib/applicationForm';
 import { PolylineBuilder, speedSpans } from '../amplify/functions/trips/routing';
 
@@ -74,6 +74,14 @@ describe('directory', () => {
     expect(websiteUrl('school.example')).toBe('https://school.example');
     expect(websiteUrl('http://a.b')).toBe('http://a.b');
     expect(websiteUrl('  ')).toBeNull();
+  });
+
+  it('builds logo initials without generic words', () => {
+    expect(schoolInitials('Al Noor International School')).toBe('AN');
+    expect(schoolInitials('Riverside Academy')).toBe('RA');
+    expect(schoolInitials('Greenfield')).toBe('GR');
+    expect(schoolInitials('مدرسة الأمل')).toBe('أ');
+    expect(schoolInitials('  ')).toBe('?');
   });
 });
 

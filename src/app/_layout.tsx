@@ -108,7 +108,8 @@ function ThemedApp() {
         <OfflineBanner />
         <RootNavigator />
         <ToastHost />
-        <PushRouter />
+        {/* expo-notifications' response hooks throw on web (no native module). */}
+        {isPushSupported ? <PushRouter /> : null}
         <AlarmRouter />
       </View>
     </ThemeContext.Provider>
@@ -119,6 +120,10 @@ function RootNavigator() {
   const session = useSession();
   const signedIn = session.status === 'signedIn';
   const role = session.role;
+  // Mount the guarded stack only once the session is known: with every guard still false the
+  // router would redirect the requested URL (web refresh, deep link) to the index screen.
+  // The splash screen stays up meanwhile.
+  if (session.status === 'loading') return null;
   return (
     <Stack screenOptions={{ headerShown: false, animation: Platform.OS === 'web' ? 'none' : 'default' }}>
       {/* Public: school directory (signed out) / redirect to the workspace (signed in) */}
@@ -166,7 +171,7 @@ function PushRouter() {
   const show = useAlarmStore((s) => s.show);
 
   useEffect(() => {
-    if (!isPushSupported || !lastResponse || session.status === 'loading') return;
+    if (!lastResponse || session.status === 'loading') return;
     const data = lastResponse.notification.request.content.data as PushData | undefined;
     const isAlarm = data?.type === 'ALARM' || data?.type === 'TEST_ALARM';
     // Alarms open even on a signed-out phone; everything else needs the account.
@@ -181,7 +186,6 @@ function PushRouter() {
   }, [lastResponse, session.status, session.role, router, show]);
 
   useEffect(() => {
-    if (!isPushSupported) return;
     const sub = Notifications.addNotificationReceivedListener((n) => {
       const data = n.request.content.data as PushData | undefined;
       if (data?.type === 'ALARM' && data.tripStopId) show(alarmFromPush(data));

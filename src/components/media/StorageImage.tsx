@@ -3,7 +3,8 @@ import { View, type StyleProp, type ViewStyle, type ImageStyle } from 'react-nat
 import { Image, type ImageContentFit } from 'expo-image';
 import { useSignedUrl } from '../../lib/storage/s3';
 import { Text } from '../../ui/Text';
-import { colorFromString, initials } from '../../ui/theme';
+import { colorFromString } from '../../ui/theme';
+import { schoolInitials } from '../../lib/directory';
 
 /**
  * Image stored in S3. Signed URLs rotate, so the disk/memory cache is keyed by the storage key
@@ -75,7 +76,7 @@ export function SchoolLogo({
       {logoKey ? (
         <StorageImage storageKey={logoKey} style={{ width: size - (bordered ? 6 : 0), height: size - (bordered ? 6 : 0) }} contentFit="contain" />
       ) : (
-        <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: size * 0.36, lineHeight: size * 0.44 }}>{initials(name)}</Text>
+        <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: size * 0.36, lineHeight: size * 0.44 }}>{schoolInitials(name)}</Text>
       )}
     </View>
   );
