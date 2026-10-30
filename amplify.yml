@@ -1,7 +1,7 @@
 # Amplify Hosting build spec (Gen 2 backend + Expo web frontend).
 # Backend: deploys amplify/ with `ampx pipeline-deploy` and writes amplify_outputs.json.
 # Frontend: exports the Expo web bundle to dist/ (single-page app – add the SPA rewrite rule,
-# see README "Hosting"). Node 22 is pinned for both phases (Expo 57 needs Node >= 20.19).
+# see README "Hosting"). Node 22 is pinned for both phases (Expo 58 needs Node >= 22.13).
 version: 1
 backend:
   phases:

@@ -1,5 +1,5 @@
 import React, { forwardRef, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View, type TextInputProps, type StyleProp, type ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View, type TextInputInstance, type TextInputProps, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { useTheme } from './theme';
@@ -15,7 +15,7 @@ export type InputProps = TextInputProps & {
   required?: boolean;
 };
 
-export const Input = forwardRef<TextInput, InputProps>(function Input(
+export const Input = forwardRef<TextInputInstance, InputProps>(function Input(
   { label, error, helper, leftIcon, rightIcon, onRightIconPress, containerStyle, secureTextEntry, required, style, editable = true, ...rest },
   ref,
 ) {

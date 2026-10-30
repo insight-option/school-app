@@ -2,6 +2,7 @@ import React from 'react';
 import { Tabs } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
+import { tabColor } from '../../../ui/tabColor';
 import { useWindowDimensions } from 'react-native';
 import { useTheme } from '../../../ui';
 import { useSession } from '../../../lib/auth/session';
@@ -27,10 +28,10 @@ export default function DriverTabs() {
         tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
       }}
     >
-      <Tabs.Screen name="trip" options={{ title: t('tabs.trip'), tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size} color={color} /> }} />
-      <Tabs.Screen name="students" options={{ title: t('tabs.students'), tabBarIcon: ({ color, size }) => <Ionicons name="people" size={size} color={color} /> }} />
-      <Tabs.Screen name="messages" options={{ title: t('tabs.messages'), tabBarBadge: unread || undefined, tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" size={size} color={color} /> }} />
-      <Tabs.Screen name="profile" options={{ title: t('tabs.profile'), tabBarIcon: ({ color, size }) => <Ionicons name="person-circle" size={size} color={color} /> }} />
+      <Tabs.Screen name="trip" options={{ title: t('tabs.trip'), tabBarIcon: ({ color, size }) => <Ionicons name="map" size={size} color={tabColor(color)} /> }} />
+      <Tabs.Screen name="students" options={{ title: t('tabs.students'), tabBarIcon: ({ color, size }) => <Ionicons name="people" size={size} color={tabColor(color)} /> }} />
+      <Tabs.Screen name="messages" options={{ title: t('tabs.messages'), tabBarBadge: unread || undefined, tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" size={size} color={tabColor(color)} /> }} />
+      <Tabs.Screen name="profile" options={{ title: t('tabs.profile'), tabBarIcon: ({ color, size }) => <Ionicons name="person-circle" size={size} color={tabColor(color)} /> }} />
     </Tabs>
   );
 }

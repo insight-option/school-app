@@ -67,7 +67,7 @@ export async function downloadTextFile(filename: string, content: string, mime =
     return;
   }
   const file = new FileSystem.File(FileSystem.Paths.cache, filename);
-  file.write(content);
+  await file.write(content);
   if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(file.uri, { mimeType: mime, dialogTitle: filename });
   else toast.info(file.uri);
 }

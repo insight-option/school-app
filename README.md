@@ -21,7 +21,8 @@ school-app/
 
 ## 1. Prerequisites
 
-- Node 20+ (tested on 24), npm 10
+- Node >=22.13.0 (tested on 24), npm 10; this project uses **Expo SDK 58**
+- iOS 16.4+ for iPhone/iPad ([SDK 58 requirements](https://docs.expo.dev/versions/v58.0.0/))
 - An AWS account with credentials in your shell (`aws sso login` / access keys) for `ampx`
 - Google Cloud project with **Maps SDK for Android**, **Maps SDK for iOS**, **Maps JavaScript API**,
   **Routes API** and **Places API (New)** enabled
@@ -81,18 +82,51 @@ AWS_PROFILE=school npm run wipe -- --yes     # removes ALL data except ADMIN-01,
 
 ## 4. Run the app
 
+### Open on an iPhone with Expo Go
+
+Install or update **Expo Go with SDK 58 support** from the App Store. Its supported SDK must
+match this project's SDK; an older published update or native build is not upgraded by changing
+the local dependencies. See the [Expo SDK upgrade guide](https://docs.expo.dev/workflow/upgrading-expo-sdk-walkthrough/).
+
+From `school-app/`, with `.env` and `amplify_outputs.json` configured as above:
+
+```bash
+npm ci
+npx expo login
+npx expo start --go --clear
+```
+
+Sign in to Expo Go with the **same Expo account** used by the CLI. Connect the iPhone and computer
+to the same Wi-Fi, scan the terminal QR code with the iPhone Camera, and open it in Expo Go.
+Keep the server running. If the network blocks the connection, restart with
+`npx expo start --go --clear --tunnel` and scan the new QR code.
+See [Expo's device connection instructions](https://docs.expo.dev/get-started/start-developing/).
+
+For background location, custom alarm sounds, and the app's full native push-notification flow,
+use a development or preview build. **Rebuild and reinstall native apps after the SDK upgrade**;
+an over-the-air JavaScript update cannot replace their native runtime. On Windows, use the
+existing EAS `preview` profile to build iOS in the cloud (requires an Apple Developer account):
+
+```bash
+npx eas-cli@latest build --platform ios --profile preview
+```
+
+Register the target iPhone when prompted and install from the resulting internal-distribution
+link. Local `npx expo run:ios` requires macOS and Xcode. See
+[development builds](https://docs.expo.dev/develop/development-builds/introduction/) and
+[iOS internal distribution](https://docs.expo.dev/build/internal-distribution/).
+
+### Other development commands
+
 ```bash
 npx expo start            # dev server – press w (web), a (Android), i (iOS)
 npm run web               # web only
 npx expo run:android      # development build (needed for push, background location, maps on device)
-npx expo run:ios
+npx expo run:ios          # macOS + Xcode only
 npm run typecheck && npm run lint && npm test
 npm run export:web        # production web bundle → dist/
 npx expo-doctor
 ```
-
-Expo Go cannot deliver remote push notifications or run the background location task; use a
-development build for the driver and parent flows.
 
 ### Demo logins (after `npm run seed`)
 
@@ -265,9 +299,9 @@ error is the last `npm error` / `[ERROR]` line. The most common ones:
 | What | How |
 |---|---|
 | **Android APK** (real native build, Google Maps, no Expo Go needed) | EAS Build, profile `preview` (`eas.json`). Current APK (build `c9e5791e`, 2026-10-19): https://expo.dev/artifacts/eas/obSf0fDfOdeYsO5UfSec2_o0DYIwFjJKKYEx4K4E-rw.apk – open on the phone, allow "install unknown apps", install. All builds and their links: https://expo.dev/accounts/masta-jazz/projects/school-app/builds. Rebuild with `npx eas-cli build -p android --profile preview`. Signing uses the local keystore in `credentials/android/release.jks` + `credentials.json` (git-ignored; back them up, you need them for every future build). |
-| **iPhone without an Apple developer account** | Install **Expo Go** from the App Store, then open the latest update of the `preview` branch: https://expo.dev/accounts/masta-jazz/projects/school-app/updates (open the update → scan the QR / tap "Open in Expo Go"), or paste `exp://u.expo.dev/update/<iOS update id>` into Expo Go. Current update group `de30832b-4c95-4f1c-9e80-611259721cf4` (iOS update `01a15ec4-eb1a-7eeb-b064-fbd1b27c61dc`). Publish a new one with `npx eas-cli update --branch preview --message "…"`. Expo Go limits: Apple Maps instead of Google Maps, sign-in uses the password flow instead of SRP, no background location (the driver's foreground tracking still publishes), no custom alarm channel on Android, in-memory storage. |
-| **iPhone / tablet with a dev server** | `npx expo start --tunnel` prints an `exp://…exp.direct` link that Expo Go on any network can open while the server runs. |
-| **Full-featured iOS build** | Needs an Apple developer account: `npx eas-cli build -p ios --profile preview` and install via TestFlight/internal distribution. |
+| **iPhone without an Apple developer account** | Use Expo Go with SDK 58 support and the development server in §4. Sign in to Expo Go and the CLI with the same Expo account. Expo Go limits: Apple Maps instead of Google Maps, sign-in uses the password flow instead of SRP, no background location (the driver's foreground tracking still publishes), no bundled custom alarm sound, in-memory storage. |
+| **iPhone / tablet on another network** | `npx expo start --go --clear --tunnel` prints a QR code for Expo Go while the server runs; the same-account requirement still applies. |
+| **Full-featured iOS build** | Needs an Apple Developer account: `npx eas-cli@latest build --platform ios --profile preview`, then install using the internal-distribution link on the registered device. Rebuild after upgrading the SDK. TestFlight uses a store/production build instead. |
 
 Push notifications on the Android APK need FCM credentials (README §7, step 2); until then the token
 request fails quietly and the alarm only rings when the app is open.

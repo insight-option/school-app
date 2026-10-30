@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, TextInput, View, type GestureResponderEvent } from 'react-native';
+import { Platform, Pressable, StyleSheet, TextInput, View, type GestureResponderEvent, type TextInputInstance } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder, useAudioRecorderState } from 'expo-audio';
@@ -33,7 +33,7 @@ export function Composer({ onSendText, onSendAttachments, disabled }: ComposerPr
   const [recording, setRecording] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const startX = useRef(0);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
 
   const send = () => {
     const v = text.trim();

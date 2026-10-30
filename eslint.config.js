@@ -10,6 +10,9 @@ module.exports = defineConfig([
   {
     rules: {
       'import/no-unresolved': 'off',
+      // TypeScript already verifies namespace members; the import plugin cannot follow Expo 58's
+      // `export *` chains (e.g. Notifications.AndroidImportance) and reports false positives.
+      'import/namespace': 'off',
     },
   },
   {

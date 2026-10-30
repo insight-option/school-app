@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Tabs } from 'expo-router';
-import type { BottomTabBarProps } from 'expo-router/build/react-navigation/bottom-tabs';
+import type { BottomTabBarProps } from 'expo-router/tabs';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -46,7 +46,7 @@ export default function AdminLayout() {
   );
 }
 
-function AdminTabBar({ state, navigation, wide }: BottomTabBarProps & { wide: boolean }) {
+function AdminTabBar({ state, emitter, navigateToTab, wide }: BottomTabBarProps & { wide: boolean }) {
   const { t } = useTranslation();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -57,8 +57,10 @@ function AdminTabBar({ state, navigation, wide }: BottomTabBarProps & { wide: bo
 
   const go = (name: string) => {
     const route = state.routes.find((r) => r.name === name);
-    const event = route ? navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true }) : null;
-    if (!event?.defaultPrevented) navigation.navigate(name as never);
+    if (!route) return;
+    // React Navigation 8 tab bars get an emitter + navigateToTab instead of the navigation object.
+    const event = emitter.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+    if (!event.defaultPrevented) navigateToTab(route.key);
   };
 
   if (wide) {

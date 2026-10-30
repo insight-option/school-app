@@ -2,6 +2,7 @@ import React from 'react';
 import { Tabs } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
+import { tabColor } from '../../../ui/tabColor';
 import { useTheme } from '../../../ui';
 import { useSession } from '../../../lib/auth/session';
 import { useUnreadTotal } from '../../../features/messaging';
@@ -21,10 +22,10 @@ export default function TeacherTabs() {
         tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
       }}
     >
-      <Tabs.Screen name="class" options={{ title: t('tabs.myClass'), tabBarIcon: ({ color, size }) => <Ionicons name="school" size={size} color={color} /> }} />
-      <Tabs.Screen name="feedback" options={{ title: t('tabs.feedback'), tabBarIcon: ({ color, size }) => <Ionicons name="ribbon" size={size} color={color} /> }} />
-      <Tabs.Screen name="messages" options={{ title: t('tabs.messages'), tabBarBadge: unread || undefined, tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" size={size} color={color} /> }} />
-      <Tabs.Screen name="profile" options={{ title: t('tabs.profile'), tabBarIcon: ({ color, size }) => <Ionicons name="person-circle" size={size} color={color} /> }} />
+      <Tabs.Screen name="class" options={{ title: t('tabs.myClass'), tabBarIcon: ({ color, size }) => <Ionicons name="school" size={size} color={tabColor(color)} /> }} />
+      <Tabs.Screen name="feedback" options={{ title: t('tabs.feedback'), tabBarIcon: ({ color, size }) => <Ionicons name="ribbon" size={size} color={tabColor(color)} /> }} />
+      <Tabs.Screen name="messages" options={{ title: t('tabs.messages'), tabBarBadge: unread || undefined, tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" size={size} color={tabColor(color)} /> }} />
+      <Tabs.Screen name="profile" options={{ title: t('tabs.profile'), tabBarIcon: ({ color, size }) => <Ionicons name="person-circle" size={size} color={tabColor(color)} /> }} />
     </Tabs>
   );
 }
