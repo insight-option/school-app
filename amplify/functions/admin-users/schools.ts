@@ -14,6 +14,7 @@ import { z } from 'zod';
 import type { Schema } from '../../data/resource';
 import { audit, nowIso, unwrap, withRetry, type DataClient } from '../shared/data';
 import { DIRECTORY_HIDDEN, DIRECTORY_PUBLIC, newSchoolId, normalizeSearch } from '../shared/tenancy';
+import { recordEvent, startTrialSubscription } from '../shared/platform';
 import { HandlerError, type Caller } from '../shared/types';
 import type { SchoolCaller } from '../shared/caller';
 
@@ -168,8 +169,8 @@ export async function registerSchool(deps: Deps, identity: Caller, raw: unknown)
   const attr = (n: string) => user.UserAttributes?.find((a) => a.Name === n)?.Value;
   if (attr('email_verified') !== 'true') throw new HandlerError('Verify your e-mail address before creating a school', 'FORBIDDEN');
   const groups = await userGroups(deps, identity.username);
-  if (groups.some((g) => ['ADMIN', 'TEACHER', 'DRIVER', 'STUDENT'].includes(g))) {
-    throw new HandlerError('This account already belongs to a school', 'CONFLICT');
+  if (groups.some((g) => ['ADMIN', 'TEACHER', 'DRIVER', 'STUDENT', 'PARTNER', 'CUSTOMER', 'OWNER'].includes(g))) {
+    throw new HandlerError('This account already has a workspace', 'CONFLICT');
   }
   const email = attr('email') ?? '';
 
@@ -249,6 +250,8 @@ export async function registerSchool(deps: Deps, identity: Caller, raw: unknown)
     for (const undo of steps.reverse()) await undo().catch((err) => console.error('rollback step failed', err));
     throw e;
   }
+  await startTrialSubscription(client, { tenantId: schoolId, tenantType: 'SCHOOL', tenantName: input.name, billingName: input.adminName, billingEmail: email, billingPhone: input.phone ?? undefined });
+  await recordEvent(client, { type: 'SCHOOL_REGISTERED', title: input.name, detail: `${input.adminName} · ${email}`, tenantId: schoolId, tenantType: 'SCHOOL', actorId: identity.sub });
   await audit(client, {
     schoolId,
     actorId: identity.sub,

@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { useTheme } from './theme';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'success';
+export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'success' | 'inverse';
 export type ButtonSize = 'sm' | 'md' | 'lg' | 'xl';
 
 export type ButtonProps = Omit<PressableProps, 'style' | 'children'> & {
@@ -29,11 +29,12 @@ export function Button({ title, children, variant = 'primary', size = 'md', load
     secondary: { bg: colors.primarySoft, pressed: colors.border, fg: colors.primary, border: 'transparent' },
     outline: { bg: 'transparent', pressed: colors.surfaceAlt, fg: colors.text, border: colors.border },
     ghost: { bg: 'transparent', pressed: colors.surfaceAlt, fg: colors.primary, border: 'transparent' },
-    danger: { bg: colors.danger, pressed: '#B91C1C', fg: '#fff', border: 'transparent' },
-    success: { bg: colors.success, pressed: '#15803D', fg: '#fff', border: 'transparent' },
+    danger: { bg: colors.danger, pressed: '#C93A3F', fg: '#fff', border: 'transparent' },
+    success: { bg: colors.success, pressed: '#0E8A44', fg: '#fff', border: 'transparent' },
+    inverse: { bg: colors.inverse, pressed: colors.text, fg: colors.onInverse, border: 'transparent' },
   }[variant];
 
-  const dims = { sm: { h: 36, px: 12, fs: 14 }, md: { h: 48, px: 18, fs: 16 }, lg: { h: 56, px: 22, fs: 17 }, xl: { h: 68, px: 28, fs: 20 } }[size];
+  const dims = { sm: { h: 38, px: 14, fs: 14, r: radius.md }, md: { h: 50, px: 20, fs: 15.5, r: radius.lg }, lg: { h: 56, px: 24, fs: 16.5, r: radius.lg }, xl: { h: 66, px: 28, fs: 19, r: radius.xl } }[size];
 
   return (
     <Pressable
@@ -47,11 +48,12 @@ export function Button({ title, children, variant = 'primary', size = 'md', load
           minHeight: dims.h,
           paddingHorizontal: dims.px,
           backgroundColor: pressed ? palette.pressed : palette.bg,
-          borderColor: palette.border,
-          borderWidth: variant === 'outline' ? 1 : 0,
-          borderRadius: radius.md,
-          opacity: isDisabled ? 0.55 : 1,
+          borderColor: variant === 'outline' ? colors.borderStrong : palette.border,
+          borderWidth: variant === 'outline' ? 1.5 : 0,
+          borderRadius: dims.r,
+          opacity: isDisabled ? 0.5 : 1,
           alignSelf: fullWidth ? 'stretch' : 'auto',
+          transform: [{ scale: pressed && !isDisabled ? 0.98 : 1 }],
         },
         style,
       ]}
@@ -62,7 +64,7 @@ export function Button({ title, children, variant = 'primary', size = 'md', load
         <View style={styles.row}>
           {icon ? <Ionicons name={icon} size={dims.fs + 4} color={palette.fg} style={styles.iconLeft} /> : null}
           {title ? (
-            <Text variant="bodyStrong" style={{ color: palette.fg, fontSize: dims.fs, lineHeight: dims.fs + 6 }} numberOfLines={1}>
+            <Text variant="bodyStrong" weight="700" style={{ color: palette.fg, fontSize: dims.fs, lineHeight: dims.fs + 6 }} numberOfLines={1}>
               {title}
             </Text>
           ) : (

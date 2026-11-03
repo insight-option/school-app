@@ -19,6 +19,9 @@ import { comms } from '../functions/comms/resource';
  */
 const MEMBERS = ['TEACHER', 'DRIVER', 'STUDENT'];
 const EVERYONE = ['ADMIN', ...MEMBERS];
+// Platform roles: the owner reads everything; partners and customers see public media.
+const PLATFORM = ['OWNER', 'PARTNER', 'CUSTOMER'];
+const ALL_GROUPS = [...EVERYONE, ...PLATFORM];
 
 export const storage = defineStorage({
   name: 'schoolMedia',
@@ -27,26 +30,30 @@ export const storage = defineStorage({
     'avatars/{entity_id}/*': [
       allow.entity('identity').to(['get', 'write', 'delete']),
       allow.authenticated.to(['get']),
-      allow.groups(EVERYONE).to(['get']),
+      allow.groups(ALL_GROUPS).to(['get']),
     ],
     // Public school directory media (logos, covers): school-media/<identity id>/…
+    // Also business logos, covers and venue photos (partners upload to their identity folder).
     'school-media/{entity_id}/*': [
       allow.entity('identity').to(['get', 'write', 'delete']),
       allow.guest.to(['get']),
       allow.authenticated.to(['get']),
-      allow.groups(EVERYONE).to(['get']),
+      allow.groups(ALL_GROUPS).to(['get']),
     ],
+    // App logo / icon / hero image chosen in the owner console (OWNER writes – see backend.ts).
+    'branding/*': [allow.guest.to(['get']), allow.authenticated.to(['get']), allow.groups(ALL_GROUPS).to(['get'])],
     // Chat attachments: chat/<conversationId>/<random>…; members upload, nobody lists.
     'chat/*': [
       allow.groups(EVERYONE).to(['get', 'write']),
+      allow.groups(['OWNER']).to(['get']),
       allow.resource(comms).to(['read']),
     ],
     // Feedback attachments: teachers & the office write; the family reads (rows are school-scoped).
-    'feedback/*': [allow.groups(['TEACHER', 'ADMIN']).to(['get', 'write']), allow.groups(['STUDENT', 'DRIVER']).to(['get'])],
-    'broadcasts/*': [allow.groups(['ADMIN']).to(['get', 'write']), allow.groups(MEMBERS).to(['get'])],
+    'feedback/*': [allow.groups(['TEACHER', 'ADMIN']).to(['get', 'write']), allow.groups(['STUDENT', 'DRIVER', 'OWNER']).to(['get'])],
+    'broadcasts/*': [allow.groups(['ADMIN']).to(['get', 'write']), allow.groups([...MEMBERS, 'OWNER']).to(['get'])],
     // Legacy location of the first school's logo (new uploads go to school-media/).
-    'school/branding/*': [allow.guest.to(['get']), allow.authenticated.to(['get']), allow.groups(EVERYONE).to(['get'])],
-    'courses/*': [allow.groups(['ADMIN']).to(['get', 'write']), allow.groups(MEMBERS).to(['get'])],
+    'school/branding/*': [allow.guest.to(['get']), allow.authenticated.to(['get']), allow.groups(ALL_GROUPS).to(['get'])],
+    'courses/*': [allow.groups(['ADMIN']).to(['get', 'write']), allow.groups([...MEMBERS, 'OWNER']).to(['get'])],
     // CSV imports: imports/<identity id>/…; the import Lambda reads them.
     'imports/{entity_id}/*': [
       allow.entity('identity').to(['get', 'write', 'delete']),

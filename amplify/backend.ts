@@ -10,6 +10,7 @@ import { adminUsers } from './functions/admin-users/resource';
 import { trips } from './functions/trips/resource';
 import { alarm } from './functions/alarm/resource';
 import { comms } from './functions/comms/resource';
+import { platform } from './functions/platform/resource';
 
 const backend = defineBackend({
   auth,
@@ -19,6 +20,7 @@ const backend = defineBackend({
   trips,
   alarm,
   comms,
+  platform,
 });
 
 // ───────────────────────────── Cognito: free-form usernames (school ID) ─────────────────────────────
@@ -107,6 +109,30 @@ backend.adminUsers.resources.lambda.addToRolePolicy(
   }),
 );
 
+// ───────────────────────────── platform Lambda: partners, customers, owner console ─────────────────────────────
+backend.platform.addEnvironment('USER_POOL_ID', userPool.userPoolId);
+backend.platform.resources.lambda.addToRolePolicy(
+  new iam.PolicyStatement({
+    actions: [
+      'cognito-idp:AdminAddUserToGroup',
+      'cognito-idp:AdminRemoveUserFromGroup',
+      'cognito-idp:AdminDeleteUser',
+      'cognito-idp:AdminDisableUser',
+      'cognito-idp:AdminEnableUser',
+      'cognito-idp:AdminResetUserPassword',
+      'cognito-idp:AdminGetUser',
+      'cognito-idp:AdminUpdateUserAttributes',
+      'cognito-idp:AdminListGroupsForUser',
+      'cognito-idp:ListUsers',
+      // per-business admin groups (biz-…) and deleting school / business groups
+      'cognito-idp:CreateGroup',
+      'cognito-idp:DeleteGroup',
+      'cognito-idp:GetGroup',
+    ],
+    resources: [userPool.userPoolArn],
+  }),
+);
+
 // ───────────────────────────── alarm: "repeat until acknowledged" Step Functions loop ─────────────────────────────
 // Wait(waitSeconds) → invoke alarm Lambda (ALARM_REPEAT) → continue? → Wait … else Succeed.
 // The state machine lives in the same stack as the Lambda; the Lambda learns the ARN from a
@@ -156,7 +182,8 @@ const bucket = backend.storage.resources.bucket;
 const storageStack = Stack.of(bucket);
 const ownFolder = (prefix: string) => bucket.arnForObjects(`${prefix}/\${cognito-identity.amazonaws.com:sub}/*`);
 for (const [groupName, group] of Object.entries(backend.auth.resources.groups)) {
-  const prefixes = groupName === 'ADMIN' ? ['avatars', 'school-media', 'imports'] : ['avatars'];
+  const prefixes =
+    groupName === 'ADMIN' ? ['avatars', 'school-media', 'imports'] : groupName === 'PARTNER' || groupName === 'OWNER' ? ['avatars', 'school-media'] : ['avatars'];
   new iam.Policy(storageStack, `OwnFolderWrites${groupName}`, {
     roles: [group.role],
     statements: [
@@ -167,6 +194,17 @@ for (const [groupName, group] of Object.entries(backend.auth.resources.groups)) 
     ],
   });
 }
+
+// App branding (logo, icon, hero image) is written only by the platform owner.
+new iam.Policy(storageStack, 'OwnerBrandingWrites', {
+  roles: [backend.auth.resources.groups['OWNER'].role],
+  statements: [
+    new iam.PolicyStatement({
+      actions: ['s3:PutObject', 's3:DeleteObject', 's3:AbortMultipartUpload'],
+      resources: [bucket.arnForObjects('branding/*')],
+    }),
+  ],
+});
 
 // ───────────────────────────── outputs ─────────────────────────────
 backend.addOutput({

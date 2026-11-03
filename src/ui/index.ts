@@ -14,3 +14,4 @@ export * from './Screen';
 export * from './misc';
 export * from './Gradient';
 export * from './PressableScale';
+export * from './TabBar';

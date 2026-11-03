@@ -50,7 +50,9 @@ export const auth = defineAuth({
     'custom:role': { dataType: 'String', mutable: true, minLen: 1, maxLen: 16 },
     'custom:schoolId': { dataType: 'String', mutable: true, minLen: 1, maxLen: 64 },
   },
-  groups: ['ADMIN', 'TEACHER', 'DRIVER', 'STUDENT'],
+  // OWNER: platform owner (members added by hand in Cognito). PARTNER: activity businesses.
+  // CUSTOMER: people who book activities.
+  groups: ['ADMIN', 'TEACHER', 'DRIVER', 'STUDENT', 'OWNER', 'PARTNER', 'CUSTOMER'],
   ...(sesFromEmail
     ? {
         senders: {

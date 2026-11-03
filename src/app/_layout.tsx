@@ -9,6 +9,15 @@ import { Stack, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
+import { useFonts } from 'expo-font';
+import {
+  PlusJakartaSans_400Regular,
+  PlusJakartaSans_500Medium,
+  PlusJakartaSans_600SemiBold,
+  PlusJakartaSans_700Bold,
+  PlusJakartaSans_800ExtraBold,
+} from '@expo-google-fonts/plus-jakarta-sans';
+import { IBMPlexSansArabic_400Regular, IBMPlexSansArabic_500Medium, IBMPlexSansArabic_600SemiBold, IBMPlexSansArabic_700Bold } from '@expo-google-fonts/ibm-plex-sans-arabic';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
@@ -22,6 +31,8 @@ import { OfflineBanner, startNetworkListener } from '../lib/net/offline';
 import { useResolvedScheme } from '../lib/appearance';
 import { getPushPermissionStatus, installNotificationHandler, isPushSupported, registerDeviceForPush, routeForPush, setupNotificationChannels, type PushData } from '../lib/push/notifications';
 import { useAlarmStore } from '../lib/alarm/alarmPlayer';
+import { useBranding, useDocumentTitle } from '../features/branding';
+import { SuspendedScreen, useTenantStatus } from '../components/platform/SuspendedScreen';
 
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
@@ -40,13 +51,33 @@ function alarmFromPush(data: PushData) {
 
 export const unstable_settings = { anchor: 'index' };
 
+const FONTS = {
+  PlusJakartaSans_400Regular,
+  PlusJakartaSans_500Medium,
+  PlusJakartaSans_600SemiBold,
+  PlusJakartaSans_700Bold,
+  PlusJakartaSans_800ExtraBold,
+  IBMPlexSansArabic_400Regular,
+  IBMPlexSansArabic_500Medium,
+  IBMPlexSansArabic_600SemiBold,
+  IBMPlexSansArabic_700Bold,
+};
+
 export default function RootLayout() {
+  // Fonts load in parallel with the session; the splash stays up until both are ready (a font
+  // error falls back to the system font instead of blocking the app).
+  const [fontsLoaded, fontError] = useFonts(FONTS);
+  const sessionStatus = useSession().status;
   useEffect(() => {
     startAuthListener();
     startNetworkListener();
     installNotificationHandler();
-    void bootstrapSession().finally(() => SplashScreen.hideAsync().catch(() => undefined));
+    void bootstrapSession();
   }, []);
+  const ready = (fontsLoaded || !!fontError) && sessionStatus !== 'loading';
+  useEffect(() => {
+    if (ready) SplashScreen.hideAsync().catch(() => undefined);
+  }, [ready]);
 
   return (
     <GestureHandlerRootView style={styles.fill}>
@@ -78,8 +109,13 @@ function ThemedApp() {
   const session = useSession();
   const settings = useSettings();
   useSettingsSubscription();
-  const theme = useMemo(() => buildTheme(scheme, settings.data?.primaryColor), [scheme, settings.data?.primaryColor]);
   const { t, i18n } = useTranslation();
+  const branding = useBranding();
+  useDocumentTitle(branding.appName);
+  const arabic = i18n.language === 'ar';
+  // School workspaces wear their school's colour; everything else wears the app brand.
+  const primary = settings.data?.primaryColor || branding.primaryColor;
+  const theme = useMemo(() => buildTheme(scheme, primary, { arabic, accent: branding.accentColor }), [scheme, primary, arabic, branding.accentColor]);
   // react-native-web resolves start/end and left/right from the nearest `dir` prop, not the page's
   // <html dir>, so Arabic needs it on the root view (native flips via I18nManager instead).
   const webDir = Platform.OS === 'web' ? ({ dir: isRTL(i18n.language as AppLanguage) ? 'rtl' : 'ltr' } as object) : null;
@@ -109,7 +145,9 @@ function ThemedApp() {
       <View {...webDir} style={[styles.fill, { backgroundColor: theme.colors.background }]}>
         <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
         <OfflineBanner />
-        <RootNavigator />
+        <TenantGate>
+          <RootNavigator />
+        </TenantGate>
         <ToastHost />
         {/* expo-notifications' response hooks throw on web (no native module). */}
         {isPushSupported ? <PushRouter /> : null}
@@ -117,6 +155,17 @@ function ThemedApp() {
       </View>
     </ThemeContext.Provider>
   );
+}
+
+/**
+ * A school or business suspended by the platform owner sees a "paused" screen instead of its
+ * workspace (school members read their School row, partners their Business row – both public).
+ */
+function TenantGate({ children }: { children: React.ReactNode }) {
+  const session = useSession();
+  const status = useTenantStatus(session.status === 'signedIn' ? session.role : null, session.schoolId);
+  if (status === 'SUSPENDED') return <SuspendedScreen />;
+  return <>{children}</>;
 }
 
 function RootNavigator() {
@@ -134,13 +183,28 @@ function RootNavigator() {
       <Stack.Screen name="schools/[schoolId]/index" />
       <Stack.Screen name="schools/[schoolId]/apply" />
       <Stack.Screen name="application-status" />
+      <Stack.Screen name="explore/[categoryId]" />
+      <Stack.Screen name="venues/[venueId]/index" />
+      <Stack.Screen name="venues/[venueId]/book" />
+      <Stack.Screen name="businesses/[businessId]" />
       {/* The alarm must open from a notification even when the phone is signed out. */}
       <Stack.Screen name="alarm/[tripStopId]" options={{ presentation: 'fullScreenModal', gestureEnabled: false }} />
       <Stack.Protected guard={!signedIn}>
         <Stack.Screen name="(auth)" />
       </Stack.Protected>
       <Stack.Protected guard={signedIn && !role}>
+        <Stack.Screen name="onboarding/index" />
         <Stack.Screen name="onboarding/school" />
+        <Stack.Screen name="onboarding/business" />
+      </Stack.Protected>
+      <Stack.Protected guard={signedIn && role === 'OWNER'}>
+        <Stack.Screen name="(owner)" />
+      </Stack.Protected>
+      <Stack.Protected guard={signedIn && role === 'PARTNER'}>
+        <Stack.Screen name="(partner)" />
+      </Stack.Protected>
+      <Stack.Protected guard={signedIn && role === 'CUSTOMER'}>
+        <Stack.Screen name="(customer)" />
       </Stack.Protected>
       <Stack.Protected guard={signedIn && role === 'STUDENT'}>
         <Stack.Screen name="(student)" />

@@ -36,6 +36,23 @@ export type School = Schema['School']['type'];
 export type Application = Schema['Application']['type'];
 export type ApplicationStatus = Schema['ApplicationStatus']['type'];
 export type GenderPolicy = Schema['GenderPolicy']['type'];
+// platform: branding, categories, activity businesses, bookings, billing
+export type AppConfig = Schema['AppConfig']['type'];
+export type Category = Schema['Category']['type'];
+export type Business = Schema['Business']['type'];
+export type Venue = Schema['Venue']['type'];
+export type Booking = Schema['Booking']['type'];
+export type BookingStatus = Schema['BookingStatus']['type'];
+export type PriceMode = Schema['PriceMode']['type'];
+export type BookingMode = Schema['BookingMode']['type'];
+export type TenantStatus = Schema['TenantStatus']['type'];
+export type Plan = Schema['Plan']['type'];
+export type TenantSubscription = Schema['TenantSubscription']['type'];
+export type SubscriptionStatus = Schema['SubscriptionStatus']['type'];
+export type BillingCycle = Schema['BillingCycle']['type'];
+export type Invoice = Schema['Invoice']['type'];
+export type InvoiceStatus = Schema['InvoiceStatus']['type'];
+export type PlatformEvent = Schema['PlatformEvent']['type'];
 
 export type Role = Schema['Role']['type'];
 export type TripType = Schema['TripType']['type'];

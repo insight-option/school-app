@@ -1,35 +1,28 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { useTranslation } from 'react-i18next';
-import { Ionicons } from '@expo/vector-icons';
-import { tabColor } from '../../../ui/tabColor';
-import { useTheme } from '../../../ui';
+import { AppTabBar, type TabSpec } from '../../../ui';
 import { useSession } from '../../../lib/auth/session';
 import { useUnreadTotal } from '../../../features/messaging';
 
 export default function StudentTabs() {
   const { t } = useTranslation();
-  const { colors } = useTheme();
   const session = useSession();
   const unread = useUnreadTotal(session.userId);
+  const tabs: TabSpec[] = [
+    { name: 'bus', title: t('tabs.bus'), icon: 'bus-outline', iconActive: 'bus' },
+    { name: 'messages', title: t('tabs.messages'), icon: 'chatbubbles-outline', iconActive: 'chatbubbles', badge: unread },
+    { name: 'feedback', title: t('tabs.feedback'), icon: 'ribbon-outline', iconActive: 'ribbon' },
+    { name: 'courses', title: t('tabs.courses'), icon: 'book-outline', iconActive: 'book' },
+    { name: 'profile', title: t('tabs.profile'), icon: 'person-circle-outline', iconActive: 'person-circle' },
+  ];
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: { backgroundColor: colors.tabBar, borderTopColor: colors.border },
-        tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
-      }}
-    >
-      <Tabs.Screen name="bus" options={{ title: t('tabs.bus'), tabBarIcon: ({ color, size }) => <Ionicons name="bus" size={size} color={tabColor(color)} /> }} />
-      <Tabs.Screen
-        name="messages"
-        options={{ title: t('tabs.messages'), tabBarBadge: unread || undefined, tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" size={size} color={tabColor(color)} /> }}
-      />
-      <Tabs.Screen name="feedback" options={{ title: t('tabs.feedback'), tabBarIcon: ({ color, size }) => <Ionicons name="ribbon" size={size} color={tabColor(color)} /> }} />
-      <Tabs.Screen name="courses" options={{ title: t('tabs.courses'), tabBarIcon: ({ color, size }) => <Ionicons name="book" size={size} color={tabColor(color)} /> }} />
-      <Tabs.Screen name="profile" options={{ title: t('tabs.profile'), tabBarIcon: ({ color, size }) => <Ionicons name="person-circle" size={size} color={tabColor(color)} /> }} />
+    <Tabs tabBar={(props) => <AppTabBar {...props} tabs={tabs} />} screenOptions={{ headerShown: false }}>
+      <Tabs.Screen name="bus" options={{ title: t('tabs.bus') }} />
+      <Tabs.Screen name="messages" options={{ title: t('tabs.messages') }} />
+      <Tabs.Screen name="feedback" options={{ title: t('tabs.feedback') }} />
+      <Tabs.Screen name="courses" options={{ title: t('tabs.courses') }} />
+      <Tabs.Screen name="profile" options={{ title: t('tabs.profile') }} />
     </Tabs>
   );
 }

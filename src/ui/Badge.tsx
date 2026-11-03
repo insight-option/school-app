@@ -27,7 +27,7 @@ export function Badge({
     danger: { bg: colors.dangerSoft, fg: colors.danger },
     warning: { bg: colors.warningSoft, fg: colors.warning },
     info: { bg: colors.primarySoft, fg: colors.info },
-    accent: { bg: colors.primarySoft, fg: colors.accent },
+    accent: { bg: colors.accentSoft, fg: colors.accent },
   };
   const c = map[tone];
   const fs = size === 'sm' ? 11 : 13;

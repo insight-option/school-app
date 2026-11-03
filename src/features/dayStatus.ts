@@ -80,7 +80,9 @@ export function useSetDayStatus() {
       const results: StudentDayStatus[] = [];
       for (const date of days) {
         const existing = await client.models.StudentDayStatus.get({ studentId: input.studentId, date });
-        const base = { studentId: input.studentId, date, ownerId: input.studentId, busId: input.busId, schoolId: input.schoolId, studentName: input.studentName, status: input.status, note: input.note ?? null, setBy: input.setBy, untilDate: input.untilDate ?? null };
+        // Cleared fields are sent as '' – AppSync rejects null from an owner without delete
+        // permission ("Unauthorized on [note, untilDate]"), which broke "I'm going again".
+        const base = { studentId: input.studentId, date, ownerId: input.studentId, busId: input.busId, schoolId: input.schoolId, studentName: input.studentName, status: input.status, note: input.note || '', setBy: input.setBy, untilDate: input.untilDate || '' };
         const res = existing.data ? await client.models.StudentDayStatus.update(base) : await client.models.StudentDayStatus.create(base);
         const row = unwrap(res, 'day status');
         if (row) results.push(row);

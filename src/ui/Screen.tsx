@@ -30,10 +30,16 @@ export function Screen({ children, title, subtitle, back, right, scroll, padded 
   const router = useRouter();
   const header =
     title || back || right ? (
-      <View style={[styles.header, { paddingHorizontal: spacing.lg, borderBottomColor: colors.border, backgroundColor: colors.background }]}>
+      <View style={[styles.header, { paddingHorizontal: spacing.lg, backgroundColor: colors.background }]}>
         {back ? (
-          <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} hitSlop={10} style={styles.back}>
-            <Ionicons name="arrow-back" size={24} color={colors.text} style={{ transform: [{ scaleX: 1 }] }} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+            hitSlop={10}
+            style={({ pressed }) => [styles.back, { backgroundColor: colors.surface, borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}
+          >
+            <Ionicons name="arrow-back" size={21} color={colors.text} style={{ transform: [{ scaleX: theme.arabic ? -1 : 1 }] }} />
           </Pressable>
         ) : null}
         <View style={{ flex: 1 }}>
@@ -86,6 +92,6 @@ export function Screen({ children, title, subtitle, back, right, scroll, padded 
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', minHeight: 56, paddingVertical: 8, gap: 12, borderBottomWidth: StyleSheet.hairlineWidth },
-  back: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', marginStart: -8 },
+  header: { flexDirection: 'row', alignItems: 'center', minHeight: 60, paddingTop: 10, paddingBottom: 10, gap: 12 },
+  back: { width: 42, height: 42, borderRadius: 21, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
 });

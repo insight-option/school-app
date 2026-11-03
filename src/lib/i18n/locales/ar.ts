@@ -1,9 +1,15 @@
 import type { TranslationKeys } from './en';
 
 import { arSchools } from './ar.schools';
+import { arPlatform } from './ar.platform';
+import { arOwner } from './ar.owner';
+import { arPartner } from './ar.partner';
 
 export const ar: TranslationKeys = {
   ...arSchools,
+  ...arPlatform,
+  ...arOwner,
+  ...arPartner,
   common: {
     appName: 'حافلة المدرسة',
     ok: 'حسنًا',

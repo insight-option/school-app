@@ -3,6 +3,7 @@ import { adminUsers } from '../functions/admin-users/resource';
 import { trips } from '../functions/trips/resource';
 import { alarm } from '../functions/alarm/resource';
 import { comms } from '../functions/comms/resource';
+import { platform } from '../functions/platform/resource';
 
 /**
  * School system schema – multi-school (multi-tenant).
@@ -19,6 +20,11 @@ import { comms } from '../functions/comms/resource';
  *    whose Lambdas scope every action to the caller's school.
  *  - Public directory: `School` is readable by guests (identity pool) and every signed-in user;
  *    applications are submitted through a guest-callable mutation and readable only by the school.
+ *  - PLATFORM OWNER `allow.group('OWNER')` on every model: the owner group (created by defineAuth,
+ *    members added by hand in Cognito) can read, change and delete everything.
+ *  - Activity businesses (partners) follow the school pattern: one Cognito group per business named
+ *    after its businessId (`biz-…`) holds that business's admins (`groupDefinedIn('businessId')`).
+ *    Customers book through Lambda-backed mutations; they read only their own bookings.
  *
  * Design rules (see PERFORMANCE.md):
  *  - every list access pattern has a secondary index, partitioned by school where it spans users;
@@ -34,7 +40,7 @@ const schema = a
       lat: a.float().required(),
       lng: a.float().required(),
     }),
-    Role: a.enum(['ADMIN', 'TEACHER', 'DRIVER', 'STUDENT']),
+    Role: a.enum(['ADMIN', 'TEACHER', 'DRIVER', 'STUDENT', 'OWNER', 'PARTNER', 'CUSTOMER']),
     TripType: a.enum(['MORNING_PICKUP', 'AFTERNOON_DROPOFF']),
     TripStatus: a.enum(['PLANNED', 'ACTIVE', 'COMPLETED', 'CANCELLED']),
     StopStatus: a.enum(['PENDING', 'ALARMED', 'ACKNOWLEDGED', 'BOARDED', 'DROPPED', 'SKIPPED', 'ABSENT']),
@@ -45,10 +51,18 @@ const schema = a
     FeedbackCategory: a.enum(['ACADEMIC', 'BEHAVIOR', 'ATTENDANCE', 'PRAISE', 'OTHER']),
     AuthorRole: a.enum(['TEACHER', 'ADMIN']),
     BroadcastAudience: a.enum(['ALL_TEACHERS', 'ALL_STUDENTS', 'ALL_DRIVERS', 'CLASS', 'BUS']),
-    NotificationType: a.enum(['ALARM', 'MESSAGE', 'FEEDBACK', 'BROADCAST', 'BUS_NEAR', 'BOARDED', 'DROPPED', 'SYSTEM', 'APPLICATION']),
+    NotificationType: a.enum(['ALARM', 'MESSAGE', 'FEEDBACK', 'BROADCAST', 'BUS_NEAR', 'BOARDED', 'DROPPED', 'SYSTEM', 'APPLICATION', 'BOOKING']),
     ImportJobStatus: a.enum(['PENDING', 'RUNNING', 'COMPLETED', 'FAILED']),
     GenderPolicy: a.enum(['MIXED', 'BOYS', 'GIRLS']),
     ApplicationStatus: a.enum(['NEW', 'REVIEWING', 'ACCEPTED', 'WAITLISTED', 'REJECTED']),
+    // ── platform (owner console, activity businesses, bookings, billing) ──
+    TenantStatus: a.enum(['ACTIVE', 'SUSPENDED', 'PENDING']),
+    PriceMode: a.enum(['PER_HOUR', 'PER_SESSION', 'PER_PERSON', 'ON_REQUEST', 'FREE']),
+    BookingMode: a.enum(['INSTANT', 'REQUEST', 'CONTACT']),
+    BookingStatus: a.enum(['PENDING', 'CONFIRMED', 'DECLINED', 'CANCELLED', 'COMPLETED', 'NO_SHOW']),
+    SubscriptionStatus: a.enum(['TRIAL', 'ACTIVE', 'PAST_DUE', 'SUSPENDED', 'CANCELLED']),
+    BillingCycle: a.enum(['MONTHLY', 'QUARTERLY', 'YEARLY']),
+    InvoiceStatus: a.enum(['DRAFT', 'ISSUED', 'PAID', 'OVERDUE', 'VOID']),
 
     // ───────────────────────────── school ─────────────────────────────
     /** Public directory listing – what parents see before signing in. Written by the school's admins. */
@@ -87,10 +101,11 @@ const schema = a
         admissionsNote: a.string(),
         requiredDocuments: a.string().array(),
         seatsAvailable: a.integer(),
+        status: a.ref('TenantStatus'), // null = ACTIVE (legacy rows); SUSPENDED blocks the workspace
       })
       .identifier(['schoolId'])
       .secondaryIndexes((index) => [index('directory').sortKeys(['nameLower']).queryField('listDirectorySchools')])
-      .authorization((allow) => [allow.guest().to(['read']), allow.authenticated().to(['read']), allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.guest().to(['read']), allow.authenticated().to(['read']), allow.groupDefinedIn('schoolId')]),
 
     /** Online admission applications – submitted without an account, reviewed by the school office. */
     Application: a
@@ -122,7 +137,7 @@ const schema = a
         index('reference').queryField('listApplicationsByReference'),
         index('parentEmailLower').sortKeys(['submittedAt']).queryField('listApplicationsByEmail'),
       ])
-      .authorization((allow) => [allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.groupDefinedIn('schoolId')]),
 
     SchoolSettings: a
       .model({
@@ -142,7 +157,7 @@ const schema = a
         senderEmail: a.string(),
       })
       .identifier(['schoolId'])
-      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     // ───────────────────────────── people ─────────────────────────────
     Profile: a
       .model({
@@ -177,7 +192,7 @@ const schema = a
         index('schoolId').sortKeys(['fullName']).queryField('listProfilesBySchool'),
         index('schoolId').sortKeys(['role']).queryField('listProfilesBySchoolAndRole'),
       ])
-      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     Device: a
       .model({
         userId: a.id().required(),
@@ -190,7 +205,7 @@ const schema = a
         index('userId').queryField('listDevicesByUser'),
         index('expoPushToken').queryField('listDevicesByToken'),
       ])
-      .authorization((allow) => [allow.ownerDefinedIn('userId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('userId')]),
     Class: a
       .model({
         schoolId: a.string().required(),
@@ -205,7 +220,7 @@ const schema = a
         index('schoolId').sortKeys(['name']).queryField('listClassesBySchool'),
         index('teacherId').queryField('listClassesByTeacher'),
       ])
-      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     Bus: a
       .model({
         busId: a.id().required(), // = driver username
@@ -221,7 +236,7 @@ const schema = a
       })
       .identifier(['busId'])
       .secondaryIndexes((index) => [index('schoolId').sortKeys(['plate']).queryField('listBusesBySchool')])
-      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     // One row per bus, updated in place by the driver device.
     BusLocation: a
       .model({
@@ -237,7 +252,7 @@ const schema = a
         tripId: a.string(),
       })
       .identifier(['busId'])
-      .authorization((allow) => [
+      .authorization((allow) => [allow.group('OWNER'), 
         allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']),
         allow.ownerDefinedIn('driverUserId').to(['read', 'update']),
         allow.groupDefinedIn('schoolId'),
@@ -262,8 +277,9 @@ const schema = a
         index('date').sortKeys(['status']).queryField('listDayStatusByDate'),
         index('schoolId').sortKeys(['date']).queryField('listDayStatusBySchoolAndDate'),
       ])
-      .authorization((allow) => [
-        allow.ownerDefinedIn('ownerId').to(['create', 'update', 'read']),
+      .authorization((allow) => [allow.group('OWNER'), 
+        // 'delete' also lets the student clear note/untilDate (null) when switching back to "going".
+        allow.ownerDefinedIn('ownerId').to(['create', 'update', 'read', 'delete']),
         allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']),
         allow.groupDefinedIn('schoolId'),
       ]),
@@ -290,7 +306,7 @@ const schema = a
         index('date').sortKeys(['busId']).queryField('listTripsByDate'),
         index('schoolId').sortKeys(['date']).queryField('listTripsBySchoolAndDate'),
       ])
-      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     TripStop: a
       .model({
         tripId: a.id().required(),
@@ -319,7 +335,7 @@ const schema = a
         index('tripId').sortKeys(['order']).queryField('listStopsByTrip'),
         index('studentId').sortKeys(['date']).queryField('listStopsByStudentAndDate'),
       ])
-      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     // ───────────────────────────── messaging ─────────────────────────────
     Conversation: a
       .model({
@@ -341,7 +357,7 @@ const schema = a
         index('type').sortKeys(['lastMessageAt']).queryField('listConversationsByType'),
         index('schoolId').sortKeys(['lastMessageAt']).queryField('listConversationsBySchool'),
       ])
-      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     ConversationMember: a
       .model({
         conversationId: a.id().required(),
@@ -364,7 +380,7 @@ const schema = a
       })
       .identifier(['conversationId', 'userId'])
       .secondaryIndexes((index) => [index('userId').sortKeys(['lastMessageAt']).queryField('listMembershipsByUser')])
-      .authorization((allow) => [allow.ownerDefinedIn('ownerId').to(['read', 'update']), allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('ownerId').to(['read', 'update']), allow.groupDefinedIn('schoolId')]),
     Message: a
       .model({
         conversationId: a.id().required(),
@@ -381,7 +397,7 @@ const schema = a
         deleted: a.boolean().default(false),
       })
       .secondaryIndexes((index) => [index('conversationId').sortKeys(['sentAt']).queryField('listMessagesByConversation')])
-      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     MessageReport: a
       .model({
         schoolId: a.string().required(),
@@ -396,7 +412,7 @@ const schema = a
         resolved: a.boolean().default(false),
       })
       .secondaryIndexes((index) => [index('schoolId').sortKeys(['reportedAt']).queryField('listReportsBySchool')])
-      .authorization((allow) => [allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.groupDefinedIn('schoolId')]),
     // ───────────────────────────── feedback & broadcasts ─────────────────────────────
     Feedback: a
       .model({
@@ -421,7 +437,7 @@ const schema = a
         index('authorId').sortKeys(['postedAt']).queryField('listFeedbackByAuthor'),
         index('schoolId').sortKeys(['postedAt']).queryField('listFeedbackBySchool'),
       ])
-      .authorization((allow) => [
+      .authorization((allow) => [allow.group('OWNER'), 
         // the student/parent sees feedback about them; teachers see what they wrote (other teachers'
         // notes about a student come through the listStudentFeedback query, which checks the class)
         allow.ownerDefinedIn('studentId').to(['read']),
@@ -448,7 +464,7 @@ const schema = a
         index('targetId').sortKeys(['postedAt']).queryField('listBroadcastsByTarget'),
         index('schoolId').sortKeys(['postedAt']).queryField('listBroadcastsBySchool'),
       ])
-      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     Notification: a
       .model({
         userId: a.id().required(),
@@ -461,7 +477,7 @@ const schema = a
         sentAt: a.datetime().required(),
       })
       .secondaryIndexes((index) => [index('userId').sortKeys(['sentAt']).queryField('listNotificationsByUser')])
-      .authorization((allow) => [allow.ownerDefinedIn('userId').to(['read', 'update'])]),
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('userId').to(['read', 'update'])]),
     // ───────────────────────────── courses (content arrives later) ─────────────────────────────
     Course: a
       .model({
@@ -478,7 +494,7 @@ const schema = a
         index('schoolId').sortKeys(['title']).queryField('listCoursesBySchool'),
         index('classId').queryField('listCoursesByClass'),
       ])
-      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     CourseLesson: a
       .model({
         courseId: a.id().required(),
@@ -491,7 +507,7 @@ const schema = a
         published: a.boolean().default(false),
       })
       .secondaryIndexes((index) => [index('courseId').sortKeys(['order']).queryField('listLessonsByCourse')])
-      .authorization((allow) => [allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']), allow.groupDefinedIn('schoolId')]),
     CourseEnrollment: a
       .model({
         courseId: a.id().required(),
@@ -504,7 +520,7 @@ const schema = a
         index('studentId').queryField('listEnrollmentsByStudent'),
         index('courseId').queryField('listEnrollmentsByCourse'),
       ])
-      .authorization((allow) => [allow.ownerDefinedIn('studentId').to(['read', 'update']), allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('studentId').to(['read', 'update']), allow.groupDefinedIn('schoolId')]),
     // ───────────────────────────── ops ─────────────────────────────
     AuditLog: a
       .model({
@@ -523,7 +539,7 @@ const schema = a
         index('entityId').sortKeys(['occurredAt']).queryField('listAuditByEntity'),
         index('actorId').sortKeys(['occurredAt']).queryField('listAuditByActor'),
       ])
-      .authorization((allow) => [allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.groupDefinedIn('schoolId')]),
     ImportJob: a
       .model({
         adminId: a.string().required(),
@@ -540,8 +556,270 @@ const schema = a
         finishedAt: a.datetime(),
       })
       .secondaryIndexes((index) => [index('adminId').sortKeys(['startedAt']).queryField('listImportJobsByAdmin')])
-      .authorization((allow) => [allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.groupDefinedIn('schoolId')]),
     // ───────────────────────────── custom operation result types ─────────────────────────────
+    // ───────────────────────────── platform: branding & categories ─────────────────────────────
+    /** Single row (id 'app'): name, logo and colours of the whole app – edited in the owner console. */
+    AppConfig: a
+      .model({
+        appName: a.string().required(),
+        appNameAr: a.string(),
+        tagline: a.string(),
+        taglineAr: a.string(),
+        logoKey: a.string(),
+        iconKey: a.string(),
+        heroImageKey: a.string(),
+        primaryColor: a.string(),
+        accentColor: a.string(),
+        heroTitle: a.string(),
+        heroTitleAr: a.string(),
+        heroSubtitle: a.string(),
+        heroSubtitleAr: a.string(),
+        announcement: a.string(),
+        announcementAr: a.string(),
+        supportEmail: a.string(),
+        supportPhone: a.string(),
+        whatsapp: a.string(),
+        instagram: a.string(),
+        website: a.string(),
+        currency: a.string(),
+        defaultCommissionPercent: a.float(),
+      })
+      .authorization((allow) => [allow.group('OWNER'), allow.guest().to(['read']), allow.authenticated().to(['read'])]),
+
+    /** Explore categories (Schools, Football, Padel, …); `kind` SCHOOL | ACTIVITY. */
+    Category: a
+      .model({
+        slug: a.string().required(),
+        kind: a.string().required(),
+        nameEn: a.string().required(),
+        nameAr: a.string(),
+        descriptionEn: a.string(),
+        descriptionAr: a.string(),
+        icon: a.string(),
+        color: a.string(),
+        imageKey: a.string(),
+        order: a.integer(),
+        active: a.boolean(),
+      })
+      .authorization((allow) => [allow.group('OWNER'), allow.guest().to(['read']), allow.authenticated().to(['read'])]),
+
+    // ───────────────────────────── platform: activity businesses & venues ─────────────────────────────
+    /** A company that lists bookable activities (football pitches, padel courts, …). */
+    Business: a
+      .model({
+        businessId: a.id().required(),
+        name: a.string().required(),
+        nameLower: a.string().required(),
+        directory: a.string().required(), // 'PUBLIC' | 'HIDDEN'
+        status: a.ref('TenantStatus').required(),
+        categoryIds: a.string().array(),
+        tagline: a.string(),
+        description: a.string(),
+        logoKey: a.string(),
+        coverKey: a.string(),
+        primaryColor: a.string(),
+        phone: a.string(),
+        email: a.string(),
+        whatsapp: a.string(),
+        website: a.string(),
+        instagram: a.string(),
+        city: a.string(),
+        area: a.string(),
+        address: a.string(),
+        location: a.ref('Location'),
+        ownerUserId: a.string().required(),
+        verified: a.boolean(),
+        venueCount: a.integer(),
+      })
+      .identifier(['businessId'])
+      .secondaryIndexes((index) => [index('directory').sortKeys(['nameLower']).queryField('listDirectoryBusinesses')])
+      .authorization((allow) => [allow.group('OWNER'), allow.guest().to(['read']), allow.authenticated().to(['read']), allow.groupDefinedIn('businessId')]),
+
+    /** A bookable place of a business (one pitch type / court set) with hours and pricing. */
+    Venue: a
+      .model({
+        businessId: a.string().required(),
+        businessName: a.string(),
+        businessLogoKey: a.string(),
+        name: a.string().required(),
+        nameLower: a.string().required(),
+        categoryId: a.string().required(),
+        directory: a.string().required(), // 'PUBLIC' only while listed AND the business is active & public
+        listed: a.boolean(), // the partner's own show/hide choice
+        description: a.string(),
+        photos: a.string().array(),
+        city: a.string(),
+        area: a.string(),
+        address: a.string(),
+        location: a.ref('Location'),
+        amenities: a.string().array(),
+        audience: a.string(), // ALL | MEN | WOMEN | KIDS | FAMILY
+        indoor: a.boolean(),
+        surface: a.string(),
+        priceMode: a.ref('PriceMode').required(),
+        price: a.float(),
+        currency: a.string(),
+        priceNote: a.string(),
+        openingHours: a.json(), // { "0": [["08:00","23:00"]], … } weekday 0 = Sunday, Qatar time
+        slotMinutes: a.integer(),
+        minDurationMinutes: a.integer(),
+        maxDurationMinutes: a.integer(),
+        capacity: a.integer(), // bookable units at the same time (courts / pitches)
+        unitLabel: a.string(),
+        maxPeople: a.integer(),
+        bookingMode: a.ref('BookingMode').required(),
+        advanceDays: a.integer(),
+        cancellationHours: a.integer(),
+        rules: a.string(),
+        phone: a.string(),
+        whatsapp: a.string(),
+        featured: a.boolean(),
+        bookingCount: a.integer(),
+      })
+      .secondaryIndexes((index) => [
+        index('directory').sortKeys(['nameLower']).queryField('listDirectoryVenues'),
+        index('categoryId').sortKeys(['nameLower']).queryField('listVenuesByCategory'),
+        index('businessId').sortKeys(['nameLower']).queryField('listVenuesByBusiness'),
+      ])
+      .authorization((allow) => [allow.group('OWNER'), allow.guest().to(['read']), allow.authenticated().to(['read']), allow.groupDefinedIn('businessId')]),
+
+    /** Slot lock (venueId + date#HH:mm#unit) – written only by the booking Lambda; prevents double booking. */
+    VenueSlot: a
+      .model({
+        venueId: a.string().required(),
+        slotKey: a.string().required(),
+        date: a.string().required(),
+        bookingId: a.string().required(),
+      })
+      .identifier(['venueId', 'slotKey'])
+      .secondaryIndexes((index) => [index('venueId').sortKeys(['date']).queryField('listSlotsByVenueAndDate')])
+      .authorization((allow) => [allow.group('OWNER')]),
+
+    Booking: a
+      .model({
+        reference: a.string().required(),
+        venueId: a.string().required(),
+        venueName: a.string(),
+        venuePhotoKey: a.string(),
+        businessId: a.string().required(),
+        businessName: a.string(),
+        categoryId: a.string(),
+        customerId: a.string().required(),
+        customerName: a.string(),
+        customerPhone: a.string(),
+        customerEmail: a.string(),
+        date: a.string().required(),
+        startTime: a.string().required(),
+        endTime: a.string().required(),
+        durationMinutes: a.integer().required(),
+        unit: a.integer(),
+        unitLabel: a.string(),
+        people: a.integer(),
+        price: a.float(),
+        currency: a.string(),
+        priceMode: a.ref('PriceMode'),
+        status: a.ref('BookingStatus').required(),
+        note: a.string(),
+        businessNote: a.string(),
+        cancelledBy: a.string(),
+        respondedAt: a.datetime(),
+        bookedAt: a.datetime().required(),
+      })
+      .secondaryIndexes((index) => [
+        index('venueId').sortKeys(['date']).queryField('listBookingsByVenue'),
+        index('businessId').sortKeys(['bookedAt']).queryField('listBookingsByBusiness'),
+        index('businessId').sortKeys(['date']).queryField('listBookingsByBusinessAndDate'),
+        index('customerId').sortKeys(['bookedAt']).queryField('listBookingsByCustomer'),
+        index('reference').queryField('listBookingsByReference'),
+      ])
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('customerId').to(['read']), allow.groupDefinedIn('businessId').to(['read'])]),
+
+    // ───────────────────────────── platform: billing (owner charges schools & businesses) ─────────────────────────────
+    Plan: a
+      .model({
+        name: a.string().required(),
+        nameAr: a.string(),
+        tenantType: a.string().required(), // SCHOOL | BUSINESS | ANY
+        priceMonthly: a.float(),
+        priceYearly: a.float(),
+        currency: a.string(),
+        commissionPercent: a.float(),
+        features: a.string().array(),
+        featuresAr: a.string().array(),
+        trialDays: a.integer(),
+        active: a.boolean(),
+        highlight: a.boolean(),
+        order: a.integer(),
+      })
+      .authorization((allow) => [allow.group('OWNER'), allow.guest().to(['read']), allow.authenticated().to(['read'])]),
+
+    /** One per tenant (school or business); `tenantId` = schoolId | businessId. */
+    TenantSubscription: a
+      .model({
+        tenantId: a.id().required(),
+        tenantType: a.string().required(), // SCHOOL | BUSINESS
+        tenantName: a.string().required(),
+        planId: a.string(),
+        planName: a.string(),
+        status: a.ref('SubscriptionStatus').required(),
+        cycle: a.ref('BillingCycle'),
+        price: a.float(),
+        currency: a.string(),
+        commissionPercent: a.float(),
+        trialEndsAt: a.string(),
+        currentPeriodStart: a.string(),
+        currentPeriodEnd: a.string(),
+        billingName: a.string(),
+        billingEmail: a.string(),
+        billingPhone: a.string(),
+        notes: a.string(),
+        startedAt: a.datetime(),
+      })
+      .identifier(['tenantId'])
+      .authorization((allow) => [allow.group('OWNER'), allow.groupDefinedIn('tenantId').to(['read'])]),
+
+    Invoice: a
+      .model({
+        number: a.string().required(),
+        tenantId: a.string().required(),
+        tenantType: a.string().required(),
+        tenantName: a.string().required(),
+        issueDate: a.string().required(),
+        dueDate: a.string(),
+        periodStart: a.string(),
+        periodEnd: a.string(),
+        items: a.json(), // [{ description, quantity, unitPrice, total }]
+        subtotal: a.float(),
+        discount: a.float(),
+        tax: a.float(),
+        total: a.float().required(),
+        currency: a.string(),
+        status: a.ref('InvoiceStatus').required(),
+        paidAt: a.datetime(),
+        paymentMethod: a.string(),
+        paymentReference: a.string(),
+        notes: a.string(),
+      })
+      .secondaryIndexes((index) => [index('tenantId').sortKeys(['issueDate']).queryField('listInvoicesByTenant')])
+      .authorization((allow) => [allow.group('OWNER'), allow.groupDefinedIn('tenantId').to(['read'])]),
+
+    /** Owner activity feed: sign-ups, new venues, bookings, billing changes (written by Lambdas). */
+    PlatformEvent: a
+      .model({
+        feed: a.string().required(), // always 'ALL' (GSI partition)
+        type: a.string().required(),
+        title: a.string().required(),
+        detail: a.string(),
+        tenantId: a.string(),
+        tenantType: a.string(),
+        actorId: a.string(),
+        data: a.json(),
+        occurredAt: a.datetime().required(),
+      })
+      .secondaryIndexes((index) => [index('feed').sortKeys(['occurredAt']).queryField('listEventsByFeed')])
+      .authorization((allow) => [allow.group('OWNER')]),
+
     CreateUserResult: a.customType({
       userId: a.string().required(),
       username: a.string().required(),
@@ -566,6 +844,38 @@ const schema = a
       schoolId: a.string(),
       role: a.string(),
       changed: a.boolean().required(),
+    }),
+    AvailabilitySlot: a.customType({
+      time: a.string().required(),
+      endTime: a.string().required(),
+      free: a.integer().required(),
+      capacity: a.integer().required(),
+      past: a.boolean(),
+    }),
+    VenueAvailability: a.customType({
+      venueId: a.string().required(),
+      date: a.string().required(),
+      open: a.boolean().required(),
+      slotMinutes: a.integer().required(),
+      slots: a.ref('AvailabilitySlot').array(),
+    }),
+    OwnerOverview: a.customType({
+      json: a.string().required(), // aggregated counters & series (see platform Lambda)
+    }),
+    PlatformUser: a.customType({
+      username: a.string().required(),
+      sub: a.string(),
+      email: a.string(),
+      name: a.string(),
+      enabled: a.boolean(),
+      status: a.string(),
+      groups: a.string().array(),
+      schoolId: a.string(),
+      createdAt: a.string(),
+    }),
+    PlatformUserPage: a.customType({
+      users: a.ref('PlatformUser').array(),
+      nextToken: a.string(),
     }),
     ApplicationReceipt: a.customType({
       reference: a.string().required(),
@@ -637,6 +947,121 @@ const schema = a
       .returns(a.ref('School'))
       .authorization((allow) => [allow.group('ADMIN')])
       .handler(a.handler.function(adminUsers)),
+
+    // ───────────────────────────── platform (Lambda: platform) ─────────────────────────────
+    /** "List my business": a signed-in account without a role creates an activity business. */
+    registerBusiness: a
+      .mutation()
+      .arguments({ business: a.json().required() })
+      .returns(a.ref('SchoolAccessResult'))
+      .authorization((allow) => [allow.authenticated()])
+      .handler(a.handler.function(platform)),
+
+    /** A self-signed-up account becomes a customer (books activities). */
+    registerCustomer: a
+      .mutation()
+      .arguments({ name: a.string().required(), phone: a.string(), language: a.string() })
+      .returns(a.ref('SchoolAccessResult'))
+      .authorization((allow) => [allow.authenticated()])
+      .handler(a.handler.function(platform)),
+
+    venueAvailability: a
+      .query()
+      .arguments({ venueId: a.string().required(), date: a.string().required() })
+      .returns(a.ref('VenueAvailability'))
+      .authorization((allow) => [allow.guest(), allow.authenticated()])
+      .handler(a.handler.function(platform)),
+
+    bookVenue: a
+      .mutation()
+      .arguments({
+        venueId: a.string().required(),
+        date: a.string().required(),
+        startTime: a.string().required(),
+        durationMinutes: a.integer().required(),
+        people: a.integer(),
+        note: a.string(),
+        phone: a.string(),
+      })
+      .returns(a.ref('Booking'))
+      .authorization((allow) => [allow.authenticated()])
+      .handler(a.handler.function(platform)),
+
+    /** Customer cancels own booking, or the business cancels it. */
+    cancelBooking: a
+      .mutation()
+      .arguments({ bookingId: a.string().required(), reason: a.string() })
+      .returns(a.ref('Booking'))
+      .authorization((allow) => [allow.authenticated()])
+      .handler(a.handler.function(platform)),
+
+    /** Business: CONFIRMED | DECLINED | COMPLETED | NO_SHOW. */
+    respondBooking: a
+      .mutation()
+      .arguments({ bookingId: a.string().required(), status: a.ref('BookingStatus').required(), note: a.string() })
+      .returns(a.ref('Booking'))
+      .authorization((allow) => [allow.groups(['PARTNER', 'OWNER'])])
+      .handler(a.handler.function(platform)),
+
+    /** Partner: save a venue (validated, denormalised, listed only when the business is active). */
+    saveVenue: a
+      .mutation()
+      .arguments({ venue: a.json().required() })
+      .returns(a.ref('Venue'))
+      .authorization((allow) => [allow.groups(['PARTNER', 'OWNER'])])
+      .handler(a.handler.function(platform)),
+
+    removeVenue: a
+      .mutation()
+      .arguments({ venueId: a.string().required() })
+      .returns(a.ref('OkResult'))
+      .authorization((allow) => [allow.groups(['PARTNER', 'OWNER'])])
+      .handler(a.handler.function(platform)),
+
+    /** Partner: update the public business profile. */
+    saveBusinessProfile: a
+      .mutation()
+      .arguments({ profile: a.json().required(), businessId: a.string() })
+      .returns(a.ref('Business'))
+      .authorization((allow) => [allow.groups(['PARTNER', 'OWNER'])])
+      .handler(a.handler.function(platform)),
+
+    ownerOverview: a
+      .query()
+      .returns(a.ref('OwnerOverview'))
+      .authorization((allow) => [allow.group('OWNER')])
+      .handler(a.handler.function(platform)),
+
+    ownerListUsers: a
+      .query()
+      .arguments({ search: a.string(), nextToken: a.string() })
+      .returns(a.ref('PlatformUserPage'))
+      .authorization((allow) => [allow.group('OWNER')])
+      .handler(a.handler.function(platform)),
+
+    /** ENABLE | DISABLE | DELETE | RESET_PASSWORD */
+    ownerUserAction: a
+      .mutation()
+      .arguments({ username: a.string().required(), action: a.string().required() })
+      .returns(a.ref('OkResult'))
+      .authorization((allow) => [allow.group('OWNER')])
+      .handler(a.handler.function(platform)),
+
+    /** Suspend / reactivate a school or business (hides it and blocks its workspace). */
+    ownerSetTenantStatus: a
+      .mutation()
+      .arguments({ tenantType: a.string().required(), tenantId: a.string().required(), status: a.ref('TenantStatus').required() })
+      .returns(a.ref('OkResult'))
+      .authorization((allow) => [allow.group('OWNER')])
+      .handler(a.handler.function(platform)),
+
+    /** Permanently deletes a school or business: data, files' records, accounts and admin group. */
+    ownerDeleteTenant: a
+      .mutation()
+      .arguments({ tenantType: a.string().required(), tenantId: a.string().required(), confirmName: a.string().required() })
+      .returns(a.ref('OkResult'))
+      .authorization((allow) => [allow.group('OWNER')])
+      .handler(a.handler.function(platform)),
 
     // ───────────────────────────── admissions (Lambda: comms) ─────────────────────────────
     submitApplication: a
@@ -963,6 +1388,7 @@ const schema = a
     allow.resource(trips).to(['query', 'mutate']),
     allow.resource(alarm).to(['query', 'mutate']),
     allow.resource(comms).to(['query', 'mutate']),
+    allow.resource(platform).to(['query', 'mutate']),
   ]);
 
 export type Schema = ClientSchema<typeof schema>;

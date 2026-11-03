@@ -21,6 +21,7 @@ const ICONS: Record<NotificationType, keyof typeof Ionicons.glyphMap> = {
   DROPPED: 'home',
   SYSTEM: 'information-circle',
   APPLICATION: 'document-text',
+  BOOKING: 'calendar',
 };
 
 export default function NotificationsScreen() {

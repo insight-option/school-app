@@ -15,7 +15,7 @@ import {
 import { create } from 'zustand';
 import { IS_EXPO_GO } from '../runtime';
 import { client, type Role } from '../data/client';
-import { roleFromGroups } from './routing';
+import { isSchoolRole, roleFromGroups } from './routing';
 
 export type SessionStatus = 'loading' | 'signedOut' | 'signedIn';
 
@@ -100,7 +100,7 @@ let syncAttemptedFor: string | null = null;
  * repaired once per app run by the backend; the tokens are then refreshed so the new claims apply.
  */
 async function maybeSyncAccess(s: Session) {
-  if (s.status !== 'signedIn' || !s.role || !s.userId) return;
+  if (s.status !== 'signedIn' || !s.role || !s.userId || !isSchoolRole(s.role)) return;
   const needs = !s.schoolId || (s.role === 'ADMIN' && !s.groups.includes(s.schoolId));
   if (!needs || syncAttemptedFor === s.userId) return;
   syncAttemptedFor = s.userId;

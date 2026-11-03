@@ -51,12 +51,18 @@ export const ListItem = React.memo(function ListItem({
       disabled={disabled || (!onPress && !onLongPress)}
       style={({ pressed }) => [
         styles.row,
-        { paddingHorizontal: spacing.lg, minHeight: 60, backgroundColor: selected ? colors.primarySoft : pressed ? colors.surfaceAlt : colors.surface, borderBottomColor: colors.border },
+        { paddingHorizontal: spacing.lg, minHeight: 64, backgroundColor: selected ? colors.primarySoft : pressed ? colors.surfaceAlt : colors.surface, borderBottomColor: colors.border },
         disabled && { opacity: 0.5 },
         style,
       ]}
     >
-      {left ? <View style={styles.left}>{left}</View> : icon ? <Ionicons name={icon} size={22} color={colors.textMuted} style={styles.left} /> : null}
+      {left ? (
+        <View style={styles.left}>{left}</View>
+      ) : icon ? (
+        <View style={[styles.iconTile, { backgroundColor: colors.surfaceAlt, borderRadius: theme.radius.md }]}>
+          <Ionicons name={icon} size={20} color={colors.text} />
+        </View>
+      ) : null}
       <View style={styles.body}>
         <Text variant="bodyStrong" numberOfLines={titleLines}>
           {title}
@@ -73,7 +79,7 @@ export const ListItem = React.memo(function ListItem({
         </Text>
       ) : null}
       {right}
-      {chevron ? <Ionicons name="chevron-forward" size={18} color={colors.textFaint} style={styles.chevron} /> : null}
+      {chevron ? <Ionicons name="chevron-forward" size={18} color={colors.textFaint} style={{ transform: [{ scaleX: theme.arabic ? -1 : 1 }] }} /> : null}
     </Pressable>
   );
 });
@@ -83,5 +89,5 @@ const styles = StyleSheet.create({
   left: { marginEnd: 2 },
   body: { flex: 1, gap: 2 },
   meta: { marginStart: 4 },
-  chevron: { transform: [{ scaleX: 1 }] },
+  iconTile: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
 });

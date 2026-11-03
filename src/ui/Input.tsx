@@ -36,10 +36,17 @@ export const Input = forwardRef<TextInputInstance, InputProps>(function Input(
       <View
         style={[
           styles.field,
-          { borderColor, borderRadius: radius.md, backgroundColor: editable ? colors.surface : colors.surfaceAlt, minHeight: theme.touchTarget },
+          {
+            borderColor,
+            borderWidth: focused || error ? 1.5 : 1,
+            borderRadius: radius.lg,
+            backgroundColor: !editable ? colors.surfaceAlt : focused ? colors.surface : theme.scheme === 'dark' ? colors.surfaceAlt : colors.surface,
+            minHeight: 52,
+          },
+          focused && !error ? { boxShadow: `0 0 0 4px ${colors.primarySoft}` } : null,
         ]}
       >
-        {leftIcon ? <Ionicons name={leftIcon} size={20} color={colors.textFaint} style={styles.icon} /> : null}
+        {leftIcon ? <Ionicons name={leftIcon} size={20} color={focused ? colors.primary : colors.textFaint} style={styles.icon} /> : null}
         <TextInput
           ref={ref}
           placeholderTextColor={colors.textFaint}
@@ -54,7 +61,7 @@ export const Input = forwardRef<TextInputInstance, InputProps>(function Input(
             rest.onBlur?.(e);
           }}
           {...rest}
-          style={[styles.input, { color: colors.text, textAlign: rest.textAlign ?? undefined }, style]}
+          style={[styles.input, { color: colors.text, fontFamily: theme.fonts.medium, textAlign: rest.textAlign ?? undefined }, style]}
         />
         {secureTextEntry ? (
           <Pressable accessibilityRole="button" accessibilityLabel={hidden ? 'Show password' : 'Hide password'} onPress={() => setHidden((h) => !h)} hitSlop={8}>

@@ -1,7 +1,13 @@
 import { enSchools } from './en.schools';
+import { enPlatform } from './en.platform';
+import { enOwner } from './en.owner';
+import { enPartner } from './en.partner';
 
 export const en = {
   ...enSchools,
+  ...enPlatform,
+  ...enOwner,
+  ...enPartner,
   common: {
     appName: 'School Bus',
     ok: 'OK',
