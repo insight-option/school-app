@@ -85,7 +85,8 @@ export function ExploreScreen({ mode }: { mode: 'guest' | 'customer' }) {
   };
 
   const cardWidth = wide ? 300 : Math.min(300, width * 0.74);
-  const heroColor = branding.primaryColor && theme.scheme === 'light' ? colors.primary : colors.primary;
+  // The hero always wears the true brand colour (dark mode only lifts it for text and buttons).
+  const heroColor = branding.primaryColor;
 
   return (
     <View style={[styles.fill, { backgroundColor: colors.background }]}>

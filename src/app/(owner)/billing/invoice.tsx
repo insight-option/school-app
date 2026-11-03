@@ -34,7 +34,8 @@ export default function OwnerInvoice() {
   const existing = id ? invoices.data?.find((i) => i.id === id) : undefined;
   const [editing, setEditing] = useState(!id);
 
-  if (id && invoices.isLoading && !existing) {
+  // New invoices wait for the list too: the next number is derived from the existing ones.
+  if (invoices.isLoading && !existing) {
     return (
       <Screen back title=" " scroll maxWidth={820}>
         <Skeleton height={220} radius={24} />

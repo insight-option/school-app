@@ -16,7 +16,10 @@ export function BrandMark({ size = 40, onDark }: { size?: number; onDark?: boole
       </View>
     );
   }
-  const letters = branding.appName.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 2) || 'Q';
+  // "OneQ" → "OQ", "Doha Hub" → "DH", "Salam" → "S"
+  const caps = branding.appName.match(/\p{Lu}/gu) ?? [];
+  const words = branding.appName.split(/\s+/).filter(Boolean);
+  const letters = caps.length >= 2 ? caps[0] + caps[caps.length - 1] : words.length >= 2 ? (words[0][0] + words[words.length - 1][0]).toUpperCase() : (branding.appName[0] ?? 'Q').toUpperCase();
   return (
     <View
       style={{

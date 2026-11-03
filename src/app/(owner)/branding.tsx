@@ -3,14 +3,13 @@ import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { Button, Card, Gradient, Input, Screen, SectionHeader, Skeleton, Text, useTheme, withAlpha } from '../../ui';
-import { shade } from '../../ui/theme';
 import { toast } from '../../ui/Toast';
 import { DEFAULT_BRANDING, useAppConfig } from '../../features/branding';
 import { useSaveAppConfig } from '../../features/owner';
 import type { AppConfig } from '../../lib/data/client';
 import { StorageImage } from '../../components/media/StorageImage';
 import { ColorField, isHexColor, parseAmount, pickAndUploadBrandingImage } from '../../components/owner/kit';
-import { BRAND_DEFAULT, ACCENT_DEFAULT } from '../../ui/theme';
+import { ACCENT_DEFAULT, BRAND_DEFAULT, shade } from '../../ui/theme';
 
 /** App-wide branding (AppConfig row 'app'): name, logo, icon, colours, home texts, support contacts. */
 export default function OwnerBranding() {
