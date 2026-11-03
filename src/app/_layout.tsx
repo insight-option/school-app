@@ -79,6 +79,9 @@ export default function RootLayout() {
   useEffect(() => {
     if (ready) SplashScreen.hideAsync().catch(() => undefined);
   }, [ready]);
+  // Android resolves a Text's typeface when it is first drawn – render nothing until the fonts are
+  // in, otherwise early screens keep the system font (the splash screen covers this moment).
+  if (!fontsLoaded && !fontError) return null;
 
   return (
     <GestureHandlerRootView style={styles.fill}>
@@ -123,12 +126,13 @@ function ThemedApp() {
 
   // Android channels (needed before the first token request on Android 13+).
   useEffect(() => {
-    void setupNotificationChannels({
+    // Expo Go on Android has no notification channels (push needs a real build) – never crash on it.
+    setupNotificationChannels({
       alarmName: t('alarm.channelName'),
       alarmDescription: t('alarm.channelDescription'),
       messages: t('alarm.messagesChannel'),
       general: t('alarm.defaultChannel'),
-    });
+    }).catch(() => undefined);
   }, [t]);
 
   // Register this device for push once per signed-in session (if permission already granted).

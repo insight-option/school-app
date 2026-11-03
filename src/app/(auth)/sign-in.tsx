@@ -45,6 +45,7 @@ export default function SignInScreen() {
       } else if (res.step === 'OTHER') setError(res.name);
       // DONE → the session store updates and the guards route to the workspace
     } catch (e) {
+      console.warn('sign-in failed', (e as { name?: string })?.name, (e as Error)?.message, String((e as { underlyingError?: unknown })?.underlyingError ?? ''));
       setError(t(authErrorKey(e)));
     } finally {
       setBusy(false);

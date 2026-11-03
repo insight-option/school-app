@@ -112,3 +112,21 @@ describe('platform roles', () => {
     expect(canAccessWorkspace('OWNER', '(owner)')).toBe(true);
   });
 });
+
+describe('Expo Go sign-in maths (Amplify native shim)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { modPow, computeS } = require('../src/lib/amplifyNativeShim') as typeof import('../src/lib/amplifyNativeShim');
+  it('computes modular powers like the native module', () => {
+    expect(modPow(4n, 13n, 497n)).toBe(445n);
+    expect(modPow(2n, 10n, 1000n)).toBe(24n);
+    expect(modPow(-3n, 3n, 7n)).toBe(1n); // (-27) mod 7 = 1
+  });
+  it('computes the SRP secret S = (B − k·g^x)^(a + u·x) mod N', () => {
+    // with B = k·g^x the base is 0 → S = 0
+    const N = BigInt('0x' + 'FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1');
+    expect(N > 0n).toBe(true);
+    const s = computeS({ g: '2', x: '5', k: '3', a: '7', b: (3n * 32n).toString(16), u: '1' });
+    expect(s).toBe('0');
+    expect(computeS({ g: '2', x: '1', k: '1', a: '1', b: '5', u: '0' })).toBe('3');
+  });
+});
