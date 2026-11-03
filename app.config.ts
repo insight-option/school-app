@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
 const androidMapsKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY ?? '';
@@ -9,15 +9,23 @@ const easProjectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID || 'e081390e-15bc-46
 // (EAS "file" env var) or drop google-services.json into the project root; see README §7.
 const googleServicesFile = process.env.GOOGLE_SERVICES_JSON ?? (existsSync('./google-services.json') ? './google-services.json' : undefined);
 
+// Name / icon chosen in the owner console, pulled in by `npm run sync-branding` (see scripts/).
+const branding: { appName?: string; primaryColor?: string | null; icon?: boolean } = existsSync('./assets/branding/branding.json')
+  ? JSON.parse(readFileSync('./assets/branding/branding.json', 'utf8'))
+  : {};
+const appName = process.env.APP_DISPLAY_NAME || branding.appName || 'OneQ';
+const brandIcon = branding.icon && existsSync('./assets/branding/icon.png') ? './assets/branding/icon.png' : null;
+const brandColor = branding.primaryColor && /^#[0-9a-fA-F]{6}$/.test(branding.primaryColor) ? branding.primaryColor : '#8A1538';
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: 'School Bus',
+  name: appName,
   slug: 'school-app',
   owner: 'masta-jazz',
   version: '1.0.0',
   scheme: 'schoolbus',
   orientation: 'default',
-  icon: './assets/icon.png',
+  icon: brandIcon ?? './assets/icon.png',
   userInterfaceStyle: 'automatic',
   // EAS Update: builds and Expo Go load JS updates from this URL. The `sdkVersion` runtime policy
   // keeps every build of the same SDK (and Expo Go) compatible with published updates.
@@ -44,12 +52,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     package: 'com.oneqapp.schoolapp',
     versionCode: 1,
     googleServicesFile,
-    adaptiveIcon: {
-      backgroundColor: '#E6F4FE',
-      foregroundImage: './assets/android-icon-foreground.png',
-      backgroundImage: './assets/android-icon-background.png',
-      monochromeImage: './assets/android-icon-monochrome.png',
-    },
+    adaptiveIcon: brandIcon
+      ? { backgroundColor: '#FFFFFF', foregroundImage: brandIcon }
+      : {
+          backgroundColor: '#E6F4FE',
+          foregroundImage: './assets/android-icon-foreground.png',
+          backgroundImage: './assets/android-icon-background.png',
+          monochromeImage: './assets/android-icon-monochrome.png',
+        },
     predictiveBackGestureEnabled: false,
     permissions: [
       'android.permission.ACCESS_COARSE_LOCATION',
@@ -97,7 +107,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       'expo-notifications',
       {
         icon: './assets/images/notification-icon.png',
-        color: '#2563EB',
+        color: brandColor,
         defaultChannel: 'default',
         sounds: ['./assets/sounds/alarm.wav'],
         enableBackgroundRemoteNotifications: true,

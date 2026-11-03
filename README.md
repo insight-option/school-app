@@ -1,8 +1,11 @@
-# School Bus – multi-school transport & communication platform
+# OneQ – schools, sports & activities platform for Qatar
 
 One Expo app (Android · iOS · Web) on an AWS Amplify Gen 2 backend (Cognito, AppSync/DynamoDB, S3,
-Lambda, Step Functions). Anyone can browse the **public school directory** and apply online without an
-account; schools **create their own workspace** ("Create my school") and run four workspaces –
+Lambda, Step Functions). Everyone lands on **Explore**: football pitches, padel and tennis courts,
+swimming, fitness, kids activities and schools, with instant search and online booking. **Activity
+businesses** list their venues and take bookings, the **platform owner** runs everything from the
+**owner console** (businesses, users, bookings, subscriptions & invoices, categories, branding), and
+schools **create their own workspace** ("Create my school") and run four workspaces –
 **School office**, **Teacher**, **Bus driver**, **Parent/Student** – with live bus tracking, traffic-aware
 pickup routes on Google Maps, a loud driver→student alarm, real-time chat with voice/photo/video/files,
 feedback, broadcasts, online admissions and a "My Courses" section ready for content.
@@ -45,6 +48,36 @@ school-app/
 - The first school (`default`) is migrated automatically: on the office admin's first sign-in the app
   calls `syncMyAccess`, which creates the `default` admin group, adds the admin and creates the
   school's directory listing.
+
+## 0a. Platform: owner console, businesses & bookings
+
+| Who | How they get in | Workspace |
+|---|---|---|
+| **Platform owner** | Created **by hand in Cognito** (see below) | Owner console: overview (MRR, revenue, bookings), schools & businesses (subscription, invoices, suspend / reactivate / delete permanently), users, bookings, billing (plans, subscriptions, invoices), categories, branding, activity feed |
+| **Activity business** (partner) | Explore → "List my business" → e-mail code → 3-step wizard | Dashboard, booking requests (confirm / decline / complete / no-show), venues (photos, location, price or "on request", opening hours, slot length, courts, booking rules, amenities), business profile, plan & invoices |
+| **Customer** | Explore → book → "Create account" (e-mail code) | Explore, My bookings (cancel, book again), account |
+| Schools | unchanged (§0) | School office, teacher, driver, parent/student |
+
+**Create the owner account (once):** Cognito console → user pool of the hosting backend (`amplify_outputs.json` → `auth.user_pool_id`) →
+**Create user** (your e-mail as user name, e-mail verified, a password) → open the user → **Add user to group** → **OWNER**
+(the group is created by the backend). Sign in with that e-mail and password – the app opens the owner console. First steps there:
+**Categories → Add the defaults**, **Billing → Plans** (e.g. a school plan and a business plan with a trial), **Branding** (name, logo, icon, colours).
+
+**Bookings:** the platform Lambda checks opening hours, slot grid, duration and advance window, then locks every slot of the
+booking (`VenueSlot`, one row per slot and court – a conditional write, so two people can never book the same court).
+INSTANT venues confirm immediately, REQUEST venues wait for the business; CONTACT venues show call / WhatsApp. Payment happens
+at the venue (no card payments yet – a payment gateway such as QPay / SkipCash / Tap can be added later).
+
+**Billing:** every new school or business starts a trial on the first active plan of its type. The owner edits subscriptions,
+issues invoices (INV-YYYY-0001), marks them paid (cash / bank transfer / card) or void; the overview shows MRR, revenue per
+month, outstanding and overdue amounts and the commission on bookings. Suspending a tenant hides it from Explore and shows its
+users a "workspace paused" screen.
+
+**Branding:** name, logo, colours and home texts change instantly for everyone. The home-screen icon and the name under it are
+part of the native build: after changing them run `npm run sync-branding`, then build (`npx eas-cli build -p android --profile preview`).
+
+**After upgrading an existing backend:** `AWS_PROFILE=school npm run repair-school-ids` adds the missing `schoolId` to bus
+positions and trip stops written by older app versions (students could not see the bus otherwise).
 
 ## 1. Prerequisites
 
@@ -235,8 +268,9 @@ Routes refresh every 5 minutes and when the bus leaves the route for a minute.
    5. Rebuild the APK (`npx eas-cli build -p android --profile preview`) – the Firebase file is
       compiled into the app, so the old APK cannot receive pushes.
 3. **iOS (APNs):** needs an Apple Developer account: `npx eas-cli credentials` → iOS → Push
-   Notifications → let EAS create the key. In **Expo Go** on iOS pushes already work (Expo's own
-   certificate), but with the default iOS sound instead of `alarm.wav`.
+   Notifications → let EAS create the key, then build (`npx eas-cli build -p ios --profile preview`).
+   **Expo Go cannot receive push notifications (Android and iOS, SDK 53+)** – the alarm only reaches
+   a phone that runs a real build (the Android APK or an iOS build).
 4. Allow notifications on the device (parents get asked during onboarding); the token is stored in the
    `Device` table (several devices per account – parent and student phones share the login). Devices
    stay registered when the user signs out, so the alarm keeps ringing on that phone until

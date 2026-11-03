@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 /**
  * One-time data repair after the multi-school upgrade: rows written by older app/APK versions may
  * lack `schoolId`, which hides them from students and drivers (member reads are school-scoped):

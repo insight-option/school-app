@@ -18,6 +18,8 @@
     "create-bus": "tsx scripts/create-bus.ts",
     "smoke": "tsx scripts/smoke.ts",
     "wipe": "tsx scripts/wipe.ts",
+    "sync-branding": "tsx scripts/sync-branding.ts",
+    "repair-school-ids": "tsx scripts/repair-school-ids.ts",
     "export:web": "expo export --platform web",
     "doctor": "expo-doctor",
     "build": "expo export --platform web --output-dir dist"
