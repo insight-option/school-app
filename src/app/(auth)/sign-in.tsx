@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { Redirect, useRouter } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, Divider, Gradient, Input, Screen, Text, useTheme } from '../../ui';
-import { shade } from '../../ui/theme';
+import { Button, Divider, Input, Screen, Text, useTheme } from '../../ui';
+import { BrandMark } from '../../components/explore/BrandMark';
+import { useBranding } from '../../features/branding';
 import { toast } from '../../ui/Toast';
 import { authErrorKey, signInWithId, useSession, useSessionStore } from '../../lib/auth/session';
 import { setAppLanguage, currentLanguage } from '../../lib/i18n';
@@ -16,12 +17,17 @@ export default function SignInScreen() {
   const theme = useTheme();
   const { colors, spacing } = theme;
   const session = useSession();
+  const branding = useBranding();
+  const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
+  useEffect(() => {
+    if (returnTo) useSessionStore.getState().setReturnTo(returnTo);
+  }, [returnTo]);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (session.status === 'signedIn') return <Redirect href={(session.role ? homeRouteForRole(session.role) : '/onboarding/school') as never} />;
+  if (session.status === 'signedIn') return <Redirect href={(session.role ? homeRouteForRole(session.role) : '/onboarding') as never} />;
 
   const submit = async () => {
     if (!username.trim() || !password) {
@@ -49,7 +55,7 @@ export default function SignInScreen() {
     <Screen scroll keyboard maxWidth={460} contentStyle={{ paddingTop: spacing.md }}>
       <View style={styles.topRow}>
         <Pressable accessibilityRole="button" accessibilityLabel={t('common.back')} hitSlop={10} onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} style={[styles.back, { backgroundColor: colors.surfaceAlt }]}>
-          <Ionicons name="arrow-back" size={22} color={colors.text} />
+          <Ionicons name="arrow-back" size={22} color={colors.text} style={{ transform: [{ scaleX: theme.arabic ? -1 : 1 }] }} />
         </Pressable>
         <View style={{ flexDirection: 'row', gap: spacing.md }}>
           {(['en', 'ar'] as const).map((lang) => (
@@ -70,9 +76,12 @@ export default function SignInScreen() {
       </View>
 
       <View style={{ alignItems: 'center', gap: spacing.md, marginTop: spacing.xxl, marginBottom: spacing.xxxl }}>
-        <Gradient stops={[shade(colors.primary, 10), colors.primary, shade(colors.primary, -30)]} style={styles.mark}>
-          <Ionicons name="bus" size={42} color={colors.onPrimary} />
-        </Gradient>
+        <View style={[styles.mark, theme.shadow.glow]}>
+          <BrandMark size={84} />
+        </View>
+        <Text variant="overline" color="primary">
+          {branding.appName}
+        </Text>
         <Text variant="display" align="center">
           {t('auth.signInTitle')}
         </Text>
@@ -115,11 +124,11 @@ export default function SignInScreen() {
       <View style={[styles.orRow, { marginTop: spacing.xl }]}>
         <Divider style={{ flex: 1, width: undefined }} />
         <Text variant="caption" color="textFaint">
-          {t('landing.ownSchoolQuestion')}
+          {t('platform.signupKind.subtitle')}
         </Text>
         <Divider style={{ flex: 1, width: undefined }} />
       </View>
-      <Button title={t('landing.createSchool')} icon="business-outline" variant="outline" size="lg" fullWidth style={{ marginTop: spacing.md }} onPress={() => router.push('/(auth)/sign-up' as never)} />
+      <Button title={t('platform.book.createAccount')} icon="person-add-outline" variant="outline" size="lg" fullWidth style={{ marginTop: spacing.md }} onPress={() => router.push('/(auth)/sign-up' as never)} />
     </Screen>
   );
 }

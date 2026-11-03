@@ -18,8 +18,8 @@ import type { School } from '../../lib/data/client';
 const MAX_WIDTH = 1200;
 
 /**
- * Landing screen for everyone who is not signed in: the public school directory with instant
- * search and filters, plus the two entry points – "Sign in" and "Create my school".
+ * The "Schools" category of Explore: the public school directory with instant search and filters,
+ * and the "Create my school" entry point.
  */
 export function DirectoryScreen() {
   const { t } = useTranslation();
@@ -129,7 +129,7 @@ export function DirectoryScreen() {
   ) : filtered ? (
     <EmptyState icon="search-outline" title={t('landing.emptyTitle')} body={t('landing.emptyBody')} actionLabel={t('landing.clearFilters')} onAction={clearFilters} />
   ) : (
-    <EmptyState icon="school-outline" title={t('landing.emptyDirectoryTitle')} body={t('landing.emptyDirectoryBody')} actionLabel={t('landing.createSchool')} onAction={() => router.push('/(auth)/sign-up' as never)} />
+    <EmptyState icon="school-outline" title={t('landing.emptyDirectoryTitle')} body={t('landing.emptyDirectoryBody')} actionLabel={t('landing.createSchool')} onAction={() => router.push('/(auth)/sign-up?kind=school' as never)} />
   );
 
   const open = (s: School) => {
@@ -139,18 +139,23 @@ export function DirectoryScreen() {
 
   return (
     <View style={[styles.fill, { backgroundColor: colors.background }]}>
-      {/* Top bar: brand · language · Sign in */}
+      {/* Top bar: back · title · language */}
       <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm, paddingHorizontal: sidePad, backgroundColor: colors.background }]}>
-        <View style={[styles.brandMark, { backgroundColor: colors.primary }]}>
-          <Ionicons name="bus" size={20} color={colors.onPrimary} />
-        </View>
-        <Text variant="subheading" numberOfLines={1} style={{ flex: 1 }}>
-          {t('landing.brand')}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('common.back')}
+          hitSlop={8}
+          onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+          style={[styles.langPill, { borderColor: colors.border, backgroundColor: colors.surface, width: 42, height: 42, borderRadius: 21 }]}
+        >
+          <Ionicons name="arrow-back" size={21} color={colors.text} style={{ transform: [{ scaleX: theme.arabic ? -1 : 1 }] }} />
+        </Pressable>
+        <Text variant="heading" numberOfLines={1} style={{ flex: 1 }}>
+          {t('platform.explore.schools')}
         </Text>
         <Pressable accessibilityRole="button" onPress={toggleLanguage} hitSlop={8} style={[styles.langPill, { borderColor: colors.border }]}>
           <Text variant="captionStrong">{currentLanguage() === 'ar' ? 'EN' : 'ع'}</Text>
         </Pressable>
-        <Button size="sm" variant="outline" icon="log-in-outline" title={t('landing.signIn')} onPress={() => router.push('/(auth)/sign-in' as never)} testID="landing-sign-in" />
       </View>
 
       <FlashList
@@ -163,7 +168,7 @@ export function DirectoryScreen() {
             <SchoolCard school={item} onPress={() => open(item)} />
           </View>
         )}
-        ListHeaderComponent={<View style={{ paddingHorizontal: spacing.sm }}>{header}</View>}
+        ListHeaderComponent={<View style={{ paddingHorizontal: spacing.sm, width: '100%', alignSelf: 'stretch' }}>{header}</View>}
         ListEmptyComponent={<View style={{ paddingHorizontal: spacing.sm, paddingTop: spacing.md }}>{empty}</View>}
         contentContainerStyle={{ paddingHorizontal: sidePad - spacing.sm, paddingBottom: 150 + insets.bottom }}
         keyboardShouldPersistTaps="handled"
@@ -181,7 +186,7 @@ export function DirectoryScreen() {
           <Text variant="caption" color="textMuted" numberOfLines={3} style={{ flex: 1 }}>
             {t('landing.runSchool')}
           </Text>
-          <Button title={t('landing.createSchool')} icon="add-circle-outline" onPress={() => router.push('/(auth)/sign-up' as never)} testID="landing-create-school" />
+          <Button title={t('landing.createSchool')} icon="add-circle-outline" onPress={() => router.push('/(auth)/sign-up?kind=school' as never)} testID="landing-create-school" />
         </View>
       </View>
     </View>

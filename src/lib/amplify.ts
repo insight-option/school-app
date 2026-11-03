@@ -35,5 +35,5 @@ type Outputs = typeof outputs & { custom?: { schoolId?: string; schoolName?: str
 const typed = outputs as Outputs;
 
 /** Product name shown before a school is known (sign-in, directory). */
-export const APP_NAME = 'School Bus';
+export const APP_NAME = 'OneQ'; // default only – the live name comes from the owner's branding (features/branding)
 export const SES_FROM_EMAIL: string = typed.custom?.sesFromEmail ?? '';

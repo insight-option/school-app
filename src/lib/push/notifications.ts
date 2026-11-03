@@ -10,8 +10,9 @@ export const MESSAGES_CHANNEL_ID = 'messages';
 export const DEFAULT_CHANNEL_ID = 'default';
 
 export type PushData = {
-  type?: 'ALARM' | 'TEST_ALARM' | 'MESSAGE' | 'FEEDBACK' | 'BROADCAST' | 'BUS_NEAR' | 'BOARDED' | 'DROPPED' | 'SYSTEM' | 'APPLICATION';
+  type?: 'ALARM' | 'TEST_ALARM' | 'MESSAGE' | 'FEEDBACK' | 'BROADCAST' | 'BUS_NEAR' | 'BOARDED' | 'DROPPED' | 'SYSTEM' | 'APPLICATION' | 'BOOKING';
   applicationId?: string;
+  bookingId?: string;
   studentName?: string;
   /** Signed "I'm coming" token for answering an alarm while signed out (see alarm Lambda). */
   ackToken?: string;
@@ -168,6 +169,9 @@ export function routeForPush(data: PushData | undefined, role: string | null): s
     case 'BOARDED':
     case 'DROPPED':
       return role === 'STUDENT' ? '/(student)/bus' : '/notifications';
+    case 'BOOKING':
+      if (!data.bookingId) return role === 'OWNER' ? '/(owner)/bookings' : '/notifications';
+      return role === 'PARTNER' ? `/(partner)/bookings/${data.bookingId}` : role === 'CUSTOMER' ? `/(customer)/booking/${data.bookingId}` : role === 'OWNER' ? '/(owner)/bookings' : '/notifications';
     case 'APPLICATION':
       return role === 'ADMIN' ? (data.applicationId ? `/(admin)/applications/${data.applicationId}` : '/(admin)/applications') : '/notifications';
     case 'BROADCAST':

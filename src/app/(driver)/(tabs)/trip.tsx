@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Badge, Button, Chip, ConfirmSheet, Text, useTheme, type BadgeTone } from '../../../ui';
+import { Badge, Button, ConfirmSheet, SegmentedControl, Text, useTheme, type BadgeTone } from '../../../ui';
 import { initials, shade } from '../../../ui/theme';
 import { toast } from '../../../ui/Toast';
 import { MapView } from '../../../components/map/MapView';
@@ -333,22 +333,38 @@ export default function DriverTripScreen() {
       <StatusBar hidden={fullscreen} animated />
       {!fullscreen ? (
         <View style={[styles.topBar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, alignItems: 'center', paddingHorizontal: 12 }}>
-            {!trip ? (
-              <>
-                <Chip label={t('driver.morning')} icon="sunny" selected={tripType === 'MORNING_PICKUP'} onPress={() => setTripType('MORNING_PICKUP')} />
-                <Chip label={t('driver.afternoon')} icon="moon" selected={tripType === 'AFTERNOON_DROPOFF'} onPress={() => setTripType('AFTERNOON_DROPOFF')} />
-                <Button title={startTrip.isPending || locating ? t('driver.starting') : t('driver.startTrip')} icon="play" variant="success" onPress={() => void onStart()} loading={startTrip.isPending || locating} disabled={!busId || !students.data?.length} testID="start-trip" />
-              </>
-            ) : (
-              <>
-                <Badge label={t(`trips.types.${trip.type}`)} tone="primary" />
-                <Button title={t('driver.endTrip')} icon="stop" variant="danger" size="sm" onPress={() => setConfirmEnd(true)} />
-                <Button title={t('driver.recompute')} icon="refresh" variant="outline" size="sm" onPress={() => compute.mutate({ tripId: trip.id, lat: busPos?.lat, lng: busPos?.lng }, { onSuccess: () => toast.success(t('student.recompute')) })} loading={compute.isPending} />
-              </>
-            )}
-            <Badge label={`${t('driver.gps')}: ${t(`driver.gps${quality === 'good' ? 'Good' : quality === 'fair' ? 'Fair' : quality === 'poor' ? 'Poor' : 'Off'}`)}`} tone={gpsTone} />
-          </ScrollView>
+          {!trip ? (
+            <View style={{ paddingHorizontal: 12, gap: 8 }}>
+              <SegmentedControl
+                value={tripType}
+                onChange={setTripType}
+                options={[
+                  { value: 'MORNING_PICKUP', label: t('driver.morning') },
+                  { value: 'AFTERNOON_DROPOFF', label: t('driver.afternoon') },
+                ]}
+              />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Button
+                  title={startTrip.isPending || locating ? t('driver.starting') : t('driver.startTrip')}
+                  icon="play"
+                  variant="success"
+                  onPress={() => void onStart()}
+                  loading={startTrip.isPending || locating}
+                  disabled={!busId || !students.data?.length}
+                  style={{ flex: 1 }}
+                  testID="start-trip"
+                />
+                <Badge label={`${t('driver.gps')}: ${t(`driver.gps${quality === 'good' ? 'Good' : quality === 'fair' ? 'Fair' : quality === 'poor' ? 'Poor' : 'Off'}`)}`} tone={gpsTone} />
+              </View>
+            </View>
+          ) : (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center', paddingHorizontal: 12 }}>
+              <Badge label={t(`trips.types.${trip.type}`)} tone="primary" />
+              <Button title={t('driver.endTrip')} icon="stop" variant="danger" size="sm" onPress={() => setConfirmEnd(true)} />
+              <Button title={t('driver.recompute')} icon="refresh" variant="outline" size="sm" onPress={() => compute.mutate({ tripId: trip.id, lat: busPos?.lat, lng: busPos?.lng }, { onSuccess: () => toast.success(t('student.recompute')) })} loading={compute.isPending} />
+              <Badge label={`${t('driver.gps')}: ${t(`driver.gps${quality === 'good' ? 'Good' : quality === 'fair' ? 'Fair' : quality === 'poor' ? 'Poor' : 'Off'}`)}`} tone={gpsTone} />
+            </View>
+          )}
           <Text variant="captionStrong" color="textMuted" style={{ paddingHorizontal: 12, paddingBottom: 6 }}>
             {t('driver.summary', counts)}
             {!trip && busPos ? ` · ${t('driverMap.startsHere')}` : ''}

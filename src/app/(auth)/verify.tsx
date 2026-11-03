@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { Button, Input, Screen, Text, useTheme } from '../../ui';
 import { toast } from '../../ui/Toast';
-import { authErrorKey, confirmSchoolOwner, resendOwnerCode, signInWithId, useSessionStore } from '../../lib/auth/session';
+import { authErrorKey, confirmSchoolOwner, nextRouteAfterSignup, resendOwnerCode, signInWithId, useSessionStore } from '../../lib/auth/session';
 import { StepDots } from '../../components/setup/StepDots';
 
 const RESEND_SECONDS = 30;
@@ -39,8 +39,9 @@ export default function VerifyScreen() {
       await confirmSchoolOwner(email, value);
       if (draft?.password) {
         const res = await signInWithId(email.trim().toLowerCase(), draft.password);
-        useSessionStore.getState().setSignup(null);
-        if (res.step === 'DONE') router.replace('/onboarding/school' as never);
+        // keep the kind / name / phone for the set-up step, drop the password from memory
+        useSessionStore.getState().setSignup({ ...draft, password: '' });
+        if (res.step === 'DONE') router.replace(nextRouteAfterSignup(draft.kind) as never);
         else router.replace('/(auth)/sign-in');
       } else {
         toast.success(t('signup.signInToContinue'));

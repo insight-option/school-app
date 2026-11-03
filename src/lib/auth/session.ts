@@ -14,7 +14,7 @@ import {
 } from 'aws-amplify/auth';
 import { create } from 'zustand';
 import { IS_EXPO_GO } from '../runtime';
-import { client, type Role } from '../data/client';
+import { client, humanizeError, type Role } from '../data/client';
 import { isSchoolRole, roleFromGroups } from './routing';
 
 export type SessionStatus = 'loading' | 'signedOut' | 'signedIn';
@@ -34,24 +34,34 @@ export type Session = {
 const signedOut: Session = { status: 'signedOut', userId: null, username: null, groups: [], role: null, email: null, name: null, schoolId: '' };
 
 /** Kept in memory between "Create my school" → e-mail code → automatic sign-in. */
-export type SignupDraft = { email: string; password: string; name: string };
+/** What a new account is for (chosen on the sign-up screen). */
+export type SignupKind = 'customer' | 'business' | 'school';
+export type SignupDraft = { email: string; password: string; name: string; kind?: SignupKind; phone?: string; returnTo?: string };
 
 type SessionState = {
   session: Session;
   pendingUsername: string | null; // set between sign-in and the forced new-password step
   signup: SignupDraft | null;
+  /** Public page to reopen after sign-in / sign-up (e.g. the booking a guest started). */
+  returnTo: string | null;
   setSession: (s: Session) => void;
   setPendingUsername: (u: string | null) => void;
   setSignup: (d: SignupDraft | null) => void;
+  setReturnTo: (path: string | null) => void;
 };
+
+/** Only in-app public paths may be resumed (never an external URL). */
+export const safeReturnPath = (p: string | null | undefined): string | null => (p && /^\/(venues|businesses|explore|schools)\/[A-Za-z0-9_\-/]+$/.test(p) ? p : null);
 
 export const useSessionStore = create<SessionState>((set) => ({
   session: { ...signedOut, status: 'loading' },
   pendingUsername: null,
   signup: null,
+  returnTo: null,
   setSession: (session) => set({ session }),
   setPendingUsername: (pendingUsername) => set({ pendingUsername }),
   setSignup: (signup) => set({ signup }),
+  setReturnTo: (returnTo) => set({ returnTo: safeReturnPath(returnTo) }),
 }));
 
 export const useSession = () => useSessionStore((s) => s.session);
@@ -172,8 +182,22 @@ export const ownerUsername = (email: string) => email.trim().toLowerCase();
 export async function signUpSchoolOwner(input: SignupDraft): Promise<'CONFIRM' | 'DONE'> {
   const username = ownerUsername(input.email);
   const res = await signUp({ username, password: input.password, options: { userAttributes: { email: username, name: input.name.trim() } } });
-  useSessionStore.getState().setSignup({ email: username, password: input.password, name: input.name.trim() });
+  useSessionStore.getState().setSignup({ ...input, email: username, password: input.password, name: input.name.trim() });
   return res.nextStep.signUpStep === 'DONE' ? 'DONE' : 'CONFIRM';
+}
+
+/** A verified, signed-in account without a workspace becomes a customer (books activities). */
+export async function registerCustomerAccount(input: { name: string; phone?: string; language?: string }): Promise<void> {
+  const res = await client.mutations.registerCustomer({ name: input.name.trim(), phone: input.phone?.trim() || undefined, language: input.language });
+  if (res.errors?.length) throw new Error(humanizeError(res.errors.map((e) => e.message).join('; ')));
+  await refreshSession();
+}
+
+/** Where a freshly verified account continues (by the kind chosen at sign-up). */
+export function nextRouteAfterSignup(kind: SignupKind | undefined): string {
+  if (kind === 'business') return '/onboarding/business';
+  if (kind === 'school') return '/onboarding/school';
+  return '/onboarding';
 }
 
 export async function confirmSchoolOwner(email: string, code: string): Promise<void> {

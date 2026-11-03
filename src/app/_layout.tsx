@@ -29,7 +29,8 @@ import { ThemeContext, buildTheme } from '../ui/theme';
 import { ToastHost } from '../ui/Toast';
 import { OfflineBanner, startNetworkListener } from '../lib/net/offline';
 import { useResolvedScheme } from '../lib/appearance';
-import { getPushPermissionStatus, installNotificationHandler, isPushSupported, registerDeviceForPush, routeForPush, setupNotificationChannels, type PushData } from '../lib/push/notifications';
+import { getPushPermissionStatus, installNotificationHandler, isPushSupported, registerDeviceForPush, requestPushPermission, routeForPush, setupNotificationChannels, type PushData } from '../lib/push/notifications';
+import { KV_KEYS, kv } from '../lib/storage/mmkv';
 import { useAlarmStore } from '../lib/alarm/alarmPlayer';
 import { useBranding, useDocumentTitle } from '../features/branding';
 import { SuspendedScreen, useTenantStatus } from '../components/platform/SuspendedScreen';
@@ -135,10 +136,17 @@ function ThemedApp() {
   useEffect(() => {
     if (session.status !== 'signedIn' || !session.userId || registeredFor.current === session.userId) return;
     registeredFor.current = session.userId;
-    void getPushPermissionStatus().then((s) => {
-      if (s === 'granted') void registerDeviceForPush(session.userId!);
+    const userId = session.userId;
+    void getPushPermissionStatus().then(async (s) => {
+      if (s === 'granted') return void registerDeviceForPush(userId);
+      // Booking requests / confirmations need notifications: partners, customers and the owner are
+      // asked once (students get the dedicated alarm onboarding screen instead).
+      if (s === 'undetermined' && (session.role === 'PARTNER' || session.role === 'CUSTOMER' || session.role === 'OWNER') && !kv.getString(KV_KEYS.onboardingNotif)) {
+        kv.setString(KV_KEYS.onboardingNotif, 'asked');
+        if (await requestPushPermission()) void registerDeviceForPush(userId);
+      }
     });
-  }, [session.status, session.userId]);
+  }, [session.status, session.userId, session.role]);
 
   return (
     <ThemeContext.Provider value={theme}>
