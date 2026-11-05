@@ -52,6 +52,8 @@ function jsonArg(value: unknown): unknown {
 }
 
 // ────────────────────────────── messaging ──────────────────────────────
+const VIEWING_STALE_MS = 30 * 60_000;
+
 const SendMessageInput = z.object({
   conversationId: z.string().min(3).max(200),
   type: z.enum(['TEXT', 'VOICE', 'IMAGE', 'VIDEO', 'FILE']),
@@ -112,21 +114,25 @@ async function sendMessage(client: DataClient, caller: SchoolCaller, raw: unknow
   });
 
   const recipients = members.filter((m) => m.userId !== senderSeat);
-  await mapLimit(members, 10, (m) =>
-    client.models.ConversationMember.update({
+  // Members with the chat open read the message right away: no unread bump, no push. A viewing flag
+  // older than VIEWING_STALE_MS is ignored (the app was killed without leaving the chat).
+  const viewing = (m: (typeof members)[number]) => !!m.isViewing && !!m.lastReadAt && Date.now() - Date.parse(m.lastReadAt) < VIEWING_STALE_MS;
+  await mapLimit(members, 10, (m) => {
+    const reads = m.userId === senderSeat || viewing(m);
+    return client.models.ConversationMember.update({
       conversationId: m.conversationId,
       userId: m.userId,
       lastMessageText: previewEn,
       lastMessageAt: sentAt,
       lastMessageSenderName: senderName,
       lastMessageType: input.type,
-      unreadCount: m.userId === senderSeat ? 0 : (m.unreadCount ?? 0) + 1,
-      ...(m.userId === senderSeat ? { lastReadAt: sentAt } : {}),
-    }),
-  );
+      unreadCount: reads ? 0 : (m.unreadCount ?? 0) + 1,
+      ...(reads ? { lastReadAt: sentAt } : {}),
+    });
+  });
 
   // Push to everyone who is not currently looking at this conversation.
-  const pushTargets = recipients.filter((m) => !m.isViewing);
+  const pushTargets = recipients.filter((m) => !viewing(m));
   const userIds: string[] = [];
   for (const m of pushTargets) {
     if (m.userId === officeSeat) userIds.push(...(await getAdminUserIds(client, caller.schoolId)));
@@ -312,16 +318,29 @@ async function submitFeedback(client: DataClient, caller: SchoolCaller, raw: unk
   const studentIds = Array.from(new Set(input.studentIds.filter((x): x is string => !!x)));
   const attachmentKeys = (input.attachmentKeys ?? []).filter((x): x is string => !!x);
   if (attachmentKeys.some((k) => !k.startsWith('feedback/'))) throw new HandlerError('Invalid attachment', 'VALIDATION');
-  const admins = input.audience === 'PARENT' ? [] : await getAdminUserIds(client, caller.schoolId);
-  let count = 0;
-
-  await mapLimit(studentIds, 4, async (studentId) => {
-    const student = (await client.models.Profile.get({ userId: studentId })).data;
-    if (!student || student.role !== 'STUDENT' || student.schoolId !== caller.schoolId) return;
-    if (author.role === 'TEACHER') {
-      const teaches = !!student.classId && ((author.classIds ?? []).includes(student.classId) || (await isClassTeacher(client, student.classId, author.userId)));
+  const [admins, loaded] = await Promise.all([
+    input.audience === 'PARENT' ? Promise.resolve([] as string[]) : getAdminUserIds(client, caller.schoolId),
+    mapLimit(studentIds, 8, async (studentId) => (await client.models.Profile.get({ userId: studentId })).data),
+  ]);
+  const students = loaded.flatMap((s) => (s && s.role === 'STUDENT' && s.schoolId === caller.schoolId ? [s] : []));
+  // Check every student first: a teacher picking one student outside their classes must not leave
+  // half of the feedback sent.
+  if (author.role === 'TEACHER') {
+    const classTeacher = new Map<string, boolean>();
+    for (const student of students) {
+      const classId = student.classId;
+      let teaches = !!classId && (author.classIds ?? []).includes(classId);
+      if (!teaches && classId) {
+        if (!classTeacher.has(classId)) classTeacher.set(classId, await isClassTeacher(client, classId, author.userId));
+        teaches = !!classTeacher.get(classId);
+      }
       if (!teaches) throw new HandlerError(`${student.fullName} is not in one of your classes`, 'FORBIDDEN');
     }
+  }
+  if (!students.length) throw new HandlerError('No students found', 'NOT_FOUND');
+  let count = 0;
+
+  await mapLimit(students, 4, async (student) => {
     const fb = unwrap(
       await client.models.Feedback.create({
         schoolId: student.schoolId,
@@ -527,46 +546,6 @@ async function updateMyProfile(client: DataClient, caller: SchoolCaller, raw: un
   return updated;
 }
 
-async function updateHomeLocation(client: DataClient, caller: SchoolCaller, args: { lat: number; lng: number; address?: string | null; userId?: string | null }): Promise<Profile> {
-  if (!Number.isFinite(args.lat) || !Number.isFinite(args.lng) || Math.abs(args.lat) > 90 || Math.abs(args.lng) > 180) {
-    throw new HandlerError('Invalid coordinates', 'VALIDATION');
-  }
-  const targetId = caller.isAdmin && args.userId ? args.userId : caller.sub;
-  const target = targetId === caller.sub ? caller.profile : unwrap(await client.models.Profile.get({ userId: targetId }), 'Profile.get');
-  if (!target) throw new HandlerError('User not found', 'NOT_FOUND');
-  assertSameSchool(caller, target.schoolId, 'User');
-  const before = target.homeLocation ? { ...target.homeLocation, address: target.homeAddress } : null;
-  const updated = unwrap(
-    await client.models.Profile.update({ userId: target.userId, homeLocation: { lat: args.lat, lng: args.lng }, homeAddress: args.address?.slice(0, 400) ?? undefined }),
-    'Profile.update',
-  );
-  if (!updated) throw new Error('Profile.update returned nothing');
-  await audit(client, {
-    schoolId: target.schoolId,
-    actorId: caller.sub,
-    actorName: caller.username,
-    action: 'UPDATE_HOME_LOCATION',
-    entityType: 'Profile',
-    entityId: target.userId,
-    before,
-    after: { lat: args.lat, lng: args.lng, address: args.address },
-  });
-  if (before && !caller.isAdmin) {
-    const admins = await getAdminUserIds(client, caller.schoolId);
-    const s = t('en');
-    await notifyUsers(client, {
-      schoolId: target.schoolId,
-      userIds: admins,
-      type: 'SYSTEM',
-      title: s.homeChanged,
-      body: s.homeChangedBody(target.fullName),
-      data: { userId: target.userId, kind: 'HOME_LOCATION_CHANGED' },
-      push: false,
-    });
-  }
-  return updated;
-}
-
 async function requestDataDeletion(client: DataClient, caller: SchoolCaller, args: { reason?: string | null }) {
   const me = caller.profile;
   await audit(client, {
@@ -619,7 +598,7 @@ async function submitApplication(client: DataClient, args: { schoolId: string; a
   if (!parsed.success) throw new HandlerError(issues(parsed.error), 'VALIDATION');
   const input = parsed.data;
   const school = (await client.models.School.get({ schoolId: args.schoolId })).data;
-  if (!school || school.directory !== DIRECTORY_PUBLIC) throw new HandlerError('School not found', 'NOT_FOUND');
+  if (!school || school.directory !== DIRECTORY_PUBLIC || school.status === 'SUSPENDED') throw new HandlerError('School not found', 'NOT_FOUND');
   if (!school.applicationsOpen) throw new HandlerError('This school is not accepting online applications right now', 'CONFLICT');
   if (school.applicationDeadline && /^\d{4}-\d{2}-\d{2}$/.test(school.applicationDeadline) && school.applicationDeadline < new Date().toISOString().slice(0, 10)) {
     throw new HandlerError('The application deadline has passed', 'CONFLICT');
@@ -815,8 +794,6 @@ export const handler = async (event: AppSyncEvent<Record<string, unknown>>) => {
         return await sendPush(client, caller, args);
       case 'updateMyProfile':
         return await updateMyProfile(client, caller, args);
-      case 'updateHomeLocation':
-        return await updateHomeLocation(client, caller, args);
       case 'requestDataDeletion':
         return await requestDataDeletion(client, caller, args);
       case 'reviewApplication':

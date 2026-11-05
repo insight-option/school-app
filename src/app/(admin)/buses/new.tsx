@@ -74,7 +74,7 @@ export default function AdminNewBus() {
           </View>
           <Input label={t('admin.plate')} value={form.plate} onChangeText={set('plate')} error={errors.plate} required autoCapitalize="characters" />
           <Input label={t('admin.driverName')} value={form.driverName} onChangeText={set('driverName')} error={errors.driverName} required />
-          <Input label={t('admin.driverPhone')} value={form.driverPhone} onChangeText={set('driverPhone')} keyboardType="phone-pad" placeholder="+9665…" />
+          <Input label={t('admin.driverPhone')} value={form.driverPhone} onChangeText={set('driverPhone')} keyboardType="phone-pad" placeholder="+974 5…" />
           <Input label={t('admin.capacity')} value={form.capacity} onChangeText={set('capacity')} error={errors.capacity} keyboardType="number-pad" />
           <Input label={t('admin.driverEmail')} value={form.email} onChangeText={set('email')} keyboardType="email-address" autoCapitalize="none" />
           <Button title={t('common.create')} size="lg" icon="bus" onPress={submit} loading={create.isPending} fullWidth />

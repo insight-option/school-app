@@ -85,7 +85,7 @@ export default function OwnerTenantDetail() {
   if (!record) {
     return (
       <Screen back title=" " maxWidth={900}>
-        <EmptyState icon="business-outline" title={t('owner.tenant.notFound')} actionLabel={t('common.back')} onAction={() => router.back()} />
+        <EmptyState icon="business-outline" title={t('owner.tenant.notFound')} actionLabel={t('common.back')} onAction={() => (router.canGoBack() ? router.back() : router.replace('/(owner)/tenants' as never))} />
       </Screen>
     );
   }

@@ -143,9 +143,10 @@ function ThemedApp() {
     const userId = session.userId;
     void getPushPermissionStatus().then(async (s) => {
       if (s === 'granted') return void registerDeviceForPush(userId);
-      // Booking requests / confirmations need notifications: partners, customers and the owner are
-      // asked once (students get the dedicated alarm onboarding screen instead).
-      if (s === 'undetermined' && (session.role === 'PARTNER' || session.role === 'CUSTOMER' || session.role === 'OWNER') && !kv.getString(KV_KEYS.onboardingNotif)) {
+      // Everyone but students is asked once at first sign-in (drivers: riders cancelling or moving their
+      // pickup; staff: messages; partners / customers / owner: bookings). Students get the dedicated
+      // alarm onboarding screen instead.
+      if (s === 'undetermined' && session.role && session.role !== 'STUDENT' && !kv.getString(KV_KEYS.onboardingNotif)) {
         kv.setString(KV_KEYS.onboardingNotif, 'asked');
         if (await requestPushPermission()) void registerDeviceForPush(userId);
       }

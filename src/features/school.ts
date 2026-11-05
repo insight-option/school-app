@@ -85,9 +85,28 @@ export function useUpdateBus() {
   return useMutation({
     mutationFn: async (input: Partial<Bus> & { busId: string }) => {
       const { createdAt: _c, updatedAt: _u, ...rest } = input as Bus;
-      return unwrap(await client.models.Bus.update(rest), 'bus');
+      const before = qc.getQueryData<Bus | null>(qk.bus(input.busId)) ?? unwrap(await client.models.Bus.get({ busId: input.busId }), 'bus');
+      const saved = unwrap(await client.models.Bus.update(rest), 'bus');
+      // Plate and driver name are denormalised onto profiles (driver header, students' "Bus …" labels).
+      const plateChanged = !!saved && !!before && saved.plate !== before.plate;
+      const nameChanged = !!saved && !!before && saved.driverName !== before.driverName;
+      if (saved && (plateChanged || nameChanged)) {
+        const riders = await listAll((nextToken) => client.models.Profile.listProfilesByBus({ busId: saved.busId }, { limit: 200, nextToken }));
+        await Promise.all(
+          riders.map((p) => {
+            if (p.role === 'DRIVER') return client.models.Profile.update({ userId: p.userId, busName: saved.plate, ...(nameChanged ? { fullName: saved.driverName } : {}) });
+            return plateChanged ? client.models.Profile.update({ userId: p.userId, busName: saved.plate }) : Promise.resolve(null);
+          }),
+        );
+      }
+      return saved;
     },
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['buses'] }),
+    onSuccess: (bus) => {
+      if (bus) qc.setQueryData(qk.bus(bus.busId), bus);
+      void qc.invalidateQueries({ queryKey: ['buses'] });
+      void qc.invalidateQueries({ queryKey: ['profiles'] });
+      void qc.invalidateQueries({ queryKey: ['profile'] });
+    },
   });
 }
 
@@ -161,7 +180,10 @@ export function useUpdateUserContact() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { username: string; email?: string; phone?: string }) => unwrap(await client.mutations.updateUserContact(input), 'update contact'),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['profile'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['profile'] });
+      void qc.invalidateQueries({ queryKey: ['profiles'] });
+    },
   });
 }
 

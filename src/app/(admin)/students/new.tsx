@@ -87,7 +87,7 @@ export default function AdminNewStudent() {
             {t('admin.capacityExceeded', { count: (bus!.studentCount ?? 0) + 1 - (bus!.capacity ?? 0) })}
           </Text>
         ) : null}
-        <Input label={t('admin.parentPhone')} value={form.parentPhone} onChangeText={set('parentPhone')} keyboardType="phone-pad" placeholder="+9665…" />
+        <Input label={t('admin.parentPhone')} value={form.parentPhone} onChangeText={set('parentPhone')} keyboardType="phone-pad" placeholder="+974 5…" />
         <Input label={t('admin.homeAddress')} value={form.homeAddress} onChangeText={set('homeAddress')} />
         <Button title={home ? `${t('admin.homeLocation')}: ${home.lat.toFixed(4)}, ${home.lng.toFixed(4)}` : t('admin.setHome')} variant="outline" icon="location-outline" onPress={() => setPickHome(true)} />
         <Button title={t('common.create')} size="lg" icon="person-add" onPress={submit} loading={create.isPending} fullWidth />

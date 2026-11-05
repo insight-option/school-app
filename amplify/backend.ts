@@ -118,6 +118,7 @@ backend.platform.resources.lambda.addToRolePolicy(
       'cognito-idp:AdminRemoveUserFromGroup',
       'cognito-idp:AdminDeleteUser',
       'cognito-idp:AdminDisableUser',
+      'cognito-idp:AdminUserGlobalSignOut', // disabling a user also ends their sessions
       'cognito-idp:AdminEnableUser',
       'cognito-idp:AdminResetUserPassword',
       'cognito-idp:AdminGetUser',

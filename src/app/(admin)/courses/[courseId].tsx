@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
-import { Badge, Button, Card, ConfirmSheet, Input, ListItem, ProgressBar, Screen, SectionHeader, Select, Sheet, SkeletonCard, Text, useTheme } from '../../../ui';
+import { Badge, Button, Card, ConfirmSheet, EmptyState, Input, ListItem, ProgressBar, Screen, SectionHeader, Select, Sheet, SkeletonCard, Text, useTheme } from '../../../ui';
 import { toast } from '../../../ui/Toast';
 import { useCourses, useDeleteCourse, useDeleteLesson, useLessons, useSaveCourse, useSaveLesson } from '../../../features/ops';
 import { useClasses } from '../../../features/school';
@@ -31,6 +31,7 @@ export default function AdminCourseDetail() {
   const [videoKey, setVideoKey] = useState<string | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [lessonToDelete, setLessonToDelete] = useState<CourseLesson | null>(null);
   const openEdit = () => {
     if (course) setForm({ title: course.title, description: course.description ?? '', classId: course.classId ?? null });
     setEdit(true);
@@ -80,7 +81,7 @@ export default function AdminCourseDetail() {
     <Screen back title={course?.title ?? t('admin.courses')} scroll maxWidth={880}>
       {!course ? (
         <View style={{ marginTop: theme.spacing.lg }}>
-          <SkeletonCard />
+          {courses.isLoading ? <SkeletonCard /> : <EmptyState icon="book-outline" title={t('office.courseNotFound')} actionLabel={t('admin.courses')} onAction={() => router.replace('/(admin)/courses')} />}
         </View>
       ) : (
         <View style={{ gap: theme.spacing.lg, paddingTop: theme.spacing.md }}>
@@ -94,7 +95,7 @@ export default function AdminCourseDetail() {
             {course.description ? <Text color="textMuted">{course.description}</Text> : null}
             <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
               <Button size="sm" variant={course.published ? 'outline' : 'success'} icon={course.published ? 'eye-off-outline' : 'eye-outline'} title={course.published ? t('admin.unpublish') : t('admin.publish')} loading={saveCourse.isPending} onPress={() => saveCourse.mutate({ id, title: course.title, published: !course.published }, { onError: (e) => toast.error(e.message) })} />
-              <Button size="sm" variant="outline" icon="image-outline" title={t('admin.uploadLogo').replace(t('admin.logo'), 'Cover')} onPress={uploadCover} />
+              <Button size="sm" variant="outline" icon="image-outline" title={t('office.uploadCover')} onPress={uploadCover} />
               <Button size="sm" variant="danger" icon="trash-outline" title={t('common.delete')} onPress={() => setConfirmDelete(true)} />
             </View>
           </Card>
@@ -108,7 +109,7 @@ export default function AdminCourseDetail() {
                 icon={l.videoKey ? 'videocam-outline' : 'document-text-outline'}
                 right={<Badge label={l.published ? t('admin.published') : t('admin.draft')} tone={l.published ? 'success' : 'neutral'} size="sm" />}
                 onPress={() => openLesson(l)}
-                onLongPress={() => deleteLesson.mutate(l, { onError: (e) => toast.error(e.message) })}
+                onLongPress={() => setLessonToDelete(l)}
                 chevron
               />
             ))}
@@ -138,8 +139,31 @@ export default function AdminCourseDetail() {
             <Button title={lessonOpen.published ? t('admin.unpublish') : t('admin.publish')} variant="secondary" onPress={() => setLessonOpen((l) => (l ? { ...l, published: !l.published } : l))} />
           ) : null}
           <Button title={t('common.save')} loading={saveLesson.isPending} onPress={submitLesson} />
+          {lessonOpen?.id ? (
+            <Button
+              title={t('common.delete')}
+              variant="ghost"
+              icon="trash-outline"
+              onPress={() => {
+                const l = (lessons.data ?? []).find((x) => x.id === lessonOpen.id);
+                setLessonOpen(null);
+                if (l) setLessonToDelete(l);
+              }}
+            />
+          ) : null}
         </View>
       </Sheet>
+      <ConfirmSheet
+        visible={!!lessonToDelete}
+        title={t('office.deleteLessonTitle')}
+        body={t('office.deleteLessonBody', { title: lessonToDelete?.title ?? '' })}
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
+        destructive
+        loading={deleteLesson.isPending}
+        onCancel={() => setLessonToDelete(null)}
+        onConfirm={() => lessonToDelete && deleteLesson.mutate(lessonToDelete, { onSuccess: () => setLessonToDelete(null), onError: (e) => toast.error(e.message) })}
+      />
       <ConfirmSheet visible={confirmDelete} title={t('common.confirmDeleteTitle')} body={t('common.confirmDeleteBody')} confirmLabel={t('common.delete')} cancelLabel={t('common.cancel')} destructive loading={deleteCourse.isPending} onCancel={() => setConfirmDelete(false)} onConfirm={() => deleteCourse.mutate(id, { onSuccess: () => router.replace('/(admin)/courses'), onError: (e) => toast.error(e.message) })} />
     </Screen>
   );

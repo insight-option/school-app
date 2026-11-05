@@ -48,6 +48,10 @@ export type MapProps = {
   onPress?: (p: LatLng) => void;
   /** Fires when the user starts dragging the map (used to pause follow mode). */
   onUserGesture?: () => void;
+  /** Map centre once the camera stops moving (centre-pin pickers). */
+  onRegionChangeComplete?: (center: LatLng) => void;
+  /** Hide the map's own POI icons, e.g. under a centre pin. */
+  hidePoi?: boolean;
   showsUserLocation?: boolean;
   showsTraffic?: boolean;
   onReady?: () => void;

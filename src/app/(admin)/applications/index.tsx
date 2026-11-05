@@ -30,7 +30,7 @@ export default function AdminApplications() {
   );
 
   const header = (
-    <View style={{ paddingHorizontal: theme.spacing.lg, paddingTop: theme.spacing.sm, gap: theme.spacing.sm }}>
+    <View style={{ width: '100%', paddingHorizontal: theme.spacing.lg, paddingTop: theme.spacing.sm, gap: theme.spacing.sm }}>
       <Input placeholder={t('admin.search')} value={query} onChangeText={setQuery} leftIcon="search" />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
         <Chip label={t('admissions.all')} count={all.length} selected={!status} onPress={() => setStatus(null)} />

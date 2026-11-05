@@ -1,8 +1,9 @@
+import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client, clientFor, listAll, unwrap, type Booking, type Business, type Category, type Venue } from '../lib/data/client';
-import { useSession } from '../lib/auth/session';
+import { useSession, useSessionStore } from '../lib/auth/session';
 import { DIRECTORY_PUBLIC, matchesSearch } from '../../amplify/functions/shared/tenancy';
-import { bookingPrice, isOpenNow, parseHours, qatarNow, toMinutes, type OpeningHours } from '../../amplify/functions/shared/booking';
+import { bookingEndMinute, bookingPrice, isOpenNow, minutesSince, msUntil, parseHours, qatarNow, toMinutes, type OpeningHours } from '../../amplify/functions/shared/booking';
 
 /**
  * Marketplace data shared by Explore (guests + customers), the partner workspace and the owner
@@ -92,7 +93,9 @@ export function useDirectoryBusinesses() {
     staleTime: 5 * 60_000,
     gcTime: 7 * 24 * 3600_000,
     queryFn: async (): Promise<Business[]> =>
-      listAll((nextToken) => clientFor(session.status === 'signedIn').models.Business.listDirectoryBusinesses({ directory: DIRECTORY_PUBLIC }, { limit: 200, nextToken }), 10),
+      (await listAll((nextToken) => clientFor(session.status === 'signedIn').models.Business.listDirectoryBusinesses({ directory: DIRECTORY_PUBLIC }, { limit: 200, nextToken }), 10)).filter(
+        (b) => b.status === 'ACTIVE',
+      ),
   });
 }
 
@@ -202,6 +205,38 @@ export function useBookVenue() {
   });
 }
 
+/**
+ * Live updates of the customer's own bookings (confirmed / declined / cancelled by the venue).
+ * No filter – customerId is the owner auth field, AppSync scopes the events to the caller.
+ */
+export function useMyBookingsLive() {
+  const session = useSession();
+  const userId = session.userId ?? '';
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (session.status !== 'signedIn' || !userId) return;
+    const upsert = (b: Booking) => {
+      if (b.customerId !== userId) return;
+      qc.setQueryData<Booking[]>(platformKeys.myBookings(userId), (old) => (old ? (old.some((x) => x.id === b.id) ? old.map((x) => (x.id === b.id ? b : x)) : [b, ...old]) : old));
+      qc.setQueryData(platformKeys.booking(b.id), b);
+    };
+    const sub = client.models.Booking.onUpdate().subscribe({ next: upsert, error: (e) => console.warn('my bookings sub', e) });
+    return () => sub.unsubscribe();
+  }, [session.status, userId, qc]);
+}
+
+/**
+ * A guest who signed in from a public page comes back to it through the auth stack; once they are
+ * there signed in, the stored "return to" target is spent (otherwise "/" would reopen it later).
+ */
+export function useConsumeReturnTo(path: string) {
+  const signedIn = useSession().status === 'signedIn';
+  useEffect(() => {
+    const store = useSessionStore.getState();
+    if (signedIn && store.returnTo === path) store.setReturnTo(null);
+  }, [signedIn, path]);
+}
+
 /** The signed-in customer's bookings, newest first. */
 export function useMyBookings() {
   const session = useSession();
@@ -241,14 +276,35 @@ export function useCancelBooking() {
   });
 }
 
-/** Upcoming = pending/confirmed and not finished yet (Qatar time). */
-export function isUpcoming(b: Pick<Booking, 'status' | 'date' | 'endTime' | 'startTime'>): boolean {
+/** Upcoming = pending/confirmed and not finished yet (Qatar time, overnight-aware). */
+export function isUpcoming(b: Pick<Booking, 'status' | 'date' | 'endTime' | 'startTime'>, now = qatarNow()): boolean {
   if (b.status !== 'PENDING' && b.status !== 'CONFIRMED') return false;
-  const now = qatarNow();
-  if (b.date > now.date) return true;
-  if (b.date < now.date) return false;
-  const end = toMinutes(b.endTime);
-  return (end <= toMinutes(b.startTime) ? end + 1440 : end) > now.minutes;
+  return minutesSince(b.date, bookingEndMinute(b.startTime, b.endTime), now) < 0;
+}
+
+/**
+ * What the customer may do with a booking right now: cancel freely, or only through the venue
+ * (started, or a confirmed booking inside the venue's cancellation window). Mirrors cancelBooking.
+ */
+export function customerCancelState(
+  b: Pick<Booking, 'status' | 'date' | 'startTime'>,
+  cancellationHours: number | null | undefined,
+  nowMs: number,
+): { canCancel: boolean; started: boolean; deadlineMs: number | null } {
+  if (b.status !== 'PENDING' && b.status !== 'CONFIRMED') return { canCancel: false, started: false, deadlineMs: null };
+  const startsIn = msUntil(b.date, toMinutes(b.startTime), nowMs);
+  if (startsIn <= 0) return { canCancel: false, started: true, deadlineMs: null };
+  const limit = b.status === 'CONFIRMED' ? (cancellationHours ?? 0) * 3_600_000 : 0;
+  return { canCancel: startsIn > limit, started: false, deadlineMs: limit ? nowMs + startsIn - limit : null };
+}
+
+/** "Sun, 2 Nov" in the app language (dates are Qatar calendar dates). */
+export function formatBookingDate(date: string, lang: string, opts: Intl.DateTimeFormatOptions = { weekday: 'short', day: 'numeric', month: 'short' }): string {
+  try {
+    return new Intl.DateTimeFormat(lang === 'ar' ? 'ar-QA' : 'en-GB', { ...opts, timeZone: 'UTC' }).format(new Date(`${date}T12:00:00Z`));
+  } catch {
+    return date;
+  }
 }
 
 export const BOOKING_TONE: Record<string, 'warning' | 'success' | 'danger' | 'neutral' | 'primary'> = {

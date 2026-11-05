@@ -33,6 +33,8 @@ export function Composer({ onSendText, onSendAttachments, disabled }: ComposerPr
   const [recording, setRecording] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const startX = useRef(0);
+  // Still holding the mic? The permission prompt or recorder start can outlast a quick tap.
+  const holding = useRef(false);
   const inputRef = useRef<TextInputInstance>(null);
 
   const send = () => {
@@ -52,6 +54,7 @@ export function Composer({ onSendText, onSendAttachments, disabled }: ComposerPr
 
   const beginRecording = async (e: GestureResponderEvent) => {
     if (disabled) return;
+    holding.current = true;
     startX.current = e.nativeEvent.pageX;
     const perm = await requestRecordingPermissionsAsync();
     if (!perm.granted) {
@@ -61,6 +64,12 @@ export function Composer({ onSendText, onSendAttachments, disabled }: ComposerPr
     try {
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       await recorder.prepareToRecordAsync();
+      if (!holding.current) {
+        // Released before the recorder was ready (e.g. first-time permission dialog): don't start.
+        toast.info(t('chat.holdToRecord'));
+        await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+        return;
+      }
       recorder.record();
       setRecording(true);
       setCancelling(false);
@@ -71,6 +80,7 @@ export function Composer({ onSendText, onSendAttachments, disabled }: ComposerPr
   };
 
   const endRecording = async () => {
+    holding.current = false;
     if (!recording) return;
     setRecording(false);
     try {

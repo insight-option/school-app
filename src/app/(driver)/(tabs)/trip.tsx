@@ -12,7 +12,7 @@ import { MapView } from '../../../components/map/MapView';
 import type { MapHandle, MapMarker, MapType, RouteOverlay } from '../../../components/map/types';
 import { ReorderableStops, STOP_ROW_HEIGHT } from '../../../components/driver/ReorderableStops';
 import { StopSheet } from '../../../components/driver/StopSheet';
-import { useMyProfile, useProfilesByBus } from '../../../features/profiles';
+import { useBusProfilesSubscription, useMyProfile, useProfilesByBus } from '../../../features/profiles';
 import { useSettings } from '../../../features/settings';
 import { routeMetaOf, useActiveTrip, useComputeRoute, useEndTrip, useNotifyBusNear, useReorderStops, useStartTrip, useTripStops, useTripSubscriptions } from '../../../features/trips';
 import { useBusDayStatusSubscription, useBusDayStatuses } from '../../../features/dayStatus';
@@ -60,6 +60,7 @@ export default function DriverTripScreen() {
   );
   useTripSubscriptions(trip?.id, focused);
   useBusDayStatusSubscription(busId, today, focused);
+  useBusProfilesSubscription(busId, focused);
 
   const startTrip = useStartTrip();
   const endTrip = useEndTrip();
@@ -199,13 +200,42 @@ export default function DriverTripScreen() {
     notifyNear.mutate(nextStop.id, { onSuccess: (r) => r?.ok && toast.info(t('driver.busNearSent', { name: nextStop.studentName })) });
   }, [nextStop?.id, nextDistance]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Live notices: a rider cancels, comes back or moves their pickup during the trip ──
+  const lastSeen = useRef<Map<string, { status: string; at: string }>>(new Map());
+  const seenTripId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!trip || !stops.data) return;
+    const first = seenTripId.current !== trip.id;
+    seenTripId.current = trip.id;
+    const seen = lastSeen.current;
+    if (first) seen.clear();
+    for (const s of stops.data) {
+      const at = s.location ? `${s.location.lat.toFixed(5)},${s.location.lng.toFixed(5)}` : '';
+      const prev = seen.get(s.id);
+      seen.set(s.id, { status: s.status, at });
+      if (!prev || first) continue;
+      if (prev.status !== 'ABSENT' && s.status === 'ABSENT') {
+        haptic('medium');
+        toast.info(t('transport.driverRiderAbsent', { name: s.studentName }));
+      } else if (prev.status === 'ABSENT' && ROUTED.has(s.status)) {
+        haptic('medium');
+        toast.info(t('transport.driverRiderBack', { name: s.studentName }));
+      } else if (prev.at && at && prev.at !== at && ROUTED.has(s.status)) {
+        haptic('medium');
+        toast.info(t('transport.driverPickupMoved', { name: s.studentName, place: s.pickupLabel || s.homeAddress || '' }));
+      }
+    }
+  }, [trip?.id, stops.data]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Markers ──
   const notGoingToday = useMemo(() => new Set((dayStatuses.data ?? []).filter((d) => d.status === 'NOT_GOING').map((d) => d.studentId)), [dayStatuses.data]);
   const stopByStudent = useMemo(() => new Map(orderedStops.map((s) => [s.studentId, s])), [orderedStops]);
   const markers: MapMarker[] = [];
   for (const s of students.data ?? []) {
-    if (!s.homeLocation) continue;
     const stop = stopByStudent.get(s.userId);
+    // During a trip the stop holds today's pickup point (it moves when the rider switches places).
+    const at = stop?.location ?? s.homeLocation;
+    if (!at) continue;
     let color = colors.markerGoing;
     if (stop) {
       if (stop.status === 'ABSENT') color = colors.markerNotGoing;
@@ -215,8 +245,8 @@ export default function DriverTripScreen() {
     markers.push({
       id: s.userId,
       kind: 'student',
-      lat: s.homeLocation.lat,
-      lng: s.homeLocation.lng,
+      lat: at.lat,
+      lng: at.lng,
       initials: initials(s.fullName),
       color,
       order: stop && stop.order < 900 && ROUTED.has(stop.status) ? stop.order : null,
@@ -407,9 +437,14 @@ export default function DriverTripScreen() {
                     <Text variant="subheading" numberOfLines={1}>
                       {nextStop.studentName}
                     </Text>
-                    {nextStop.homeAddress ? (
+                    {nextStop.pickupLabel || nextStop.homeAddress ? (
                       <Text variant="caption" color="textMuted" numberOfLines={1}>
-                        {nextStop.homeAddress}
+                        {[nextStop.pickupLabel, nextStop.homeAddress].filter(Boolean).join(' · ')}
+                      </Text>
+                    ) : null}
+                    {nextStop.pickupNote ? (
+                      <Text variant="caption" color="warning" numberOfLines={1}>
+                        {nextStop.pickupNote}
                       </Text>
                     ) : null}
                   </View>

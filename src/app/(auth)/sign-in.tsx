@@ -27,7 +27,8 @@ export default function SignInScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (session.status === 'signedIn') return <Redirect href={(session.role ? homeRouteForRole(session.role) : '/onboarding') as never} />;
+  // "/" resumes a pending return-to page (e.g. the booking a guest started) before the workspace.
+  if (session.status === 'signedIn') return <Redirect href={(!session.role ? '/onboarding' : useSessionStore.getState().returnTo ? '/' : homeRouteForRole(session.role)) as never} />;
 
   const submit = async () => {
     if (!username.trim() || !password) {

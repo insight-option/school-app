@@ -217,7 +217,12 @@ export function ExploreScreen({ mode }: { mode: 'guest' | 'customer' }) {
 
               {/* ── Popular ── */}
               {popular.length ? (
-                <Section title={t('platform.explore.popular')} icon="flame">
+                <Section
+                  title={t('platform.explore.popular')}
+                  icon="flame"
+                  action={allVenues.length > featured.length + popular.length ? t('platform.explore.seeAll') : undefined}
+                  onAction={() => router.push('/explore/all' as never)}
+                >
                   <View style={[styles.grid, wide && styles.gridWide]}>
                     {popular.map((v) => (
                       <View key={v.id} style={wide ? { width: '48.8%' } : undefined}>

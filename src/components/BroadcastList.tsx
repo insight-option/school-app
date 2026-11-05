@@ -24,6 +24,9 @@ export function BroadcastList({ items, loading, showAudience }: { items: Broadca
         <Card key={b.id} style={{ gap: theme.spacing.sm }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             {showAudience ? <Badge label={b.targetName ? `${t(`admin.audiences.${b.audience}`)} · ${b.targetName}` : t(`admin.audiences.${b.audience}`)} tone="accent" /> : null}
+            {showAudience && b.deliveryStatus && b.deliveryStatus !== 'SENT' ? (
+              <Badge label={t(`office.deliveryStatus.${b.deliveryStatus}`, { defaultValue: b.deliveryStatus })} tone={b.deliveryStatus === 'FAILED' ? 'danger' : 'warning'} size="sm" />
+            ) : null}
             <View style={{ flex: 1 }} />
             <Text variant="caption" color="textFaint">
               {formatDateTime(b.postedAt)}
@@ -32,10 +35,9 @@ export function BroadcastList({ items, loading, showAudience }: { items: Broadca
           <Text variant="subheading">{b.title}</Text>
           <Text>{b.body}</Text>
           <AttachmentChips keys={(b.attachmentKeys ?? []).filter((k): k is string => !!k)} />
-          {b.authorName ? (
+          {b.authorName || (showAudience && b.recipientCount) ? (
             <Text variant="caption" color="textMuted">
-              {t('feedback.from', { name: b.authorName })}
-              {showAudience && b.recipientCount ? ` · ${b.recipientCount} ✓` : ''}
+              {[b.authorName ? t('feedback.from', { name: b.authorName }) : null, showAudience && b.recipientCount ? t('office.recipients', { count: b.recipientCount }) : null].filter(Boolean).join(' · ')}
             </Text>
           ) : null}
         </Card>

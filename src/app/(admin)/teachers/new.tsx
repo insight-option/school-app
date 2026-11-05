@@ -51,7 +51,7 @@ export default function AdminNewTeacher() {
         </View>
         <Input label={t('common.email')} value={form.email} onChangeText={set('email')} error={errors.email} required keyboardType="email-address" autoCapitalize="none" />
         <Input label={t('common.fullName')} value={form.fullName} onChangeText={set('fullName')} error={errors.fullName} required />
-        <Input label={t('common.phone')} value={form.phone} onChangeText={set('phone')} keyboardType="phone-pad" placeholder="+9665…" />
+        <Input label={t('common.phone')} value={form.phone} onChangeText={set('phone')} keyboardType="phone-pad" placeholder="+974 5…" />
         <Select label={t('admin.assignClasses')} options={(classes.data ?? []).map((c) => ({ value: c.id, label: c.name, subtitle: c.teacherName ? `${t('admin.assignTeacher')}: ${c.teacherName}` : t('admin.noTeacher') }))} value={classIds} onChange={(v) => setClassIds((v as string[]) ?? [])} multiple searchable />
         <Button title={t('common.create')} size="lg" icon="person-add" onPress={submit} loading={create.isPending} fullWidth />
       </View>

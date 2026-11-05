@@ -38,7 +38,7 @@ export default function AdminBroadcasts() {
       for (const a of attachments) keys.push((await uploadAttachment(a, 'broadcasts')).key);
       const targetName = audience === 'CLASS' ? classes.data?.find((c) => c.id === targetId)?.name : audience === 'BUS' ? buses.data?.find((b) => b.busId === targetId)?.plate : undefined;
       await send.mutateAsync({ audience, targetId: audience === 'CLASS' || audience === 'BUS' ? targetId : 'ALL', targetName, title: title.trim(), body: body.trim(), attachmentKeys: keys, authorName: me.data?.fullName });
-      toast.success(t('admin.broadcastSent', { count: '…' }));
+      toast.success(t('office.broadcastQueued'));
       setOpen(false);
       setTitle('');
       setBody('');

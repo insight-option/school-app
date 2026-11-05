@@ -4,6 +4,7 @@ import {
   AdminEnableUserCommand,
   AdminListGroupsForUserCommand,
   AdminResetUserPasswordCommand,
+  AdminUserGlobalSignOutCommand,
   DeleteGroupCommand,
   ListUsersCommand,
   type UserType,
@@ -20,15 +21,16 @@ type Models = DataClient['models'];
 
 // ───────────────────────────── overview ─────────────────────────────
 
+/** The last n months (YYYY-MM) ending with the current Qatar month. */
 const monthsBack = (n: number) => {
-  const out: string[] = [];
-  const d = new Date();
-  d.setUTCDate(1);
-  for (let i = n - 1; i >= 0; i--) {
-    const m = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - i, 1));
-    out.push(m.toISOString().slice(0, 7));
-  }
-  return out;
+  const [y, mo] = qatarNow().date.split('-').map(Number);
+  return Array.from({ length: n }, (_, i) => new Date(Date.UTC(y, mo - 1 - (n - 1 - i), 1)).toISOString().slice(0, 7));
+};
+
+/** Qatar calendar date of a stored UTC timestamp (a booking at 01:00 in Doha belongs to that day, not the previous UTC day). */
+const qatarDate = (iso: string | null | undefined) => {
+  const ms = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(ms) ? qatarNow(ms).date : (iso ?? '').slice(0, 10);
 };
 
 async function scanAll<T>(list: (nextToken: string | null | undefined) => Promise<{ data: T[]; nextToken?: string | null; errors?: { message: string }[] }>, maxPages = 100): Promise<T[]> {
@@ -76,7 +78,7 @@ export async function ownerOverview(client: DataClient) {
   let bookings30 = 0;
   for (const b of bookings) {
     bookingsByStatus[b.status ?? 'PENDING'] = (bookingsByStatus[b.status ?? 'PENDING'] ?? 0) + 1;
-    const bookedDay = (b.bookedAt ?? '').slice(0, 10);
+    const bookedDay = qatarDate(b.bookedAt);
     if (bookedDay in bookingsByDay) bookingsByDay[bookedDay]++;
     if (bookedDay >= from30) {
       bookings30++;
@@ -94,7 +96,7 @@ export async function ownerOverview(client: DataClient) {
   const thisMonth = today.slice(0, 7);
   for (const inv of invoices) {
     if (inv.status === 'PAID') {
-      const mo = (inv.paidAt ?? inv.issueDate).slice(0, 7);
+      const mo = (inv.paidAt ? qatarDate(inv.paidAt) : inv.issueDate).slice(0, 7);
       if (mo in revenueByMonth) revenueByMonth[mo] += inv.total;
       if (mo === thisMonth) paidThisMonth += inv.total;
     } else if (inv.status === 'ISSUED' || inv.status === 'OVERDUE') {
@@ -109,7 +111,7 @@ export async function ownerOverview(client: DataClient) {
     subsByStatus[s.status] = (subsByStatus[s.status] ?? 0) + 1;
     if (s.status === 'ACTIVE' || s.status === 'PAST_DUE') mrr += monthlyEquivalent(s.price, s.cycle);
   }
-  const newTenants30 = [...schools, ...businesses].filter((t) => (t.createdAt ?? '').slice(0, 10) >= from30).length;
+  const newTenants30 = [...schools, ...businesses].filter((t) => qatarDate(t.createdAt) >= from30).length;
 
   return {
     json: JSON.stringify({
@@ -179,6 +181,8 @@ export async function ownerUserAction(deps: Deps, identity: Caller, args: { user
       break;
     case 'DISABLE':
       await cognito.send(new AdminDisableUserCommand({ UserPoolId: userPoolId, Username: args.username }));
+      // Revoke refresh tokens too, so the disabled account is signed out everywhere within the hour.
+      await cognito.send(new AdminUserGlobalSignOutCommand({ UserPoolId: userPoolId, Username: args.username })).catch((e) => console.warn('global sign-out failed', e));
       break;
     case 'RESET_PASSWORD':
       await cognito.send(new AdminResetUserPasswordCommand({ UserPoolId: userPoolId, Username: args.username }));

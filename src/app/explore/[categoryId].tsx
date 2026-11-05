@@ -37,6 +37,7 @@ function VenuesByCategory({ categoryId }: { categoryId: string }) {
   const deferred = useDeferredValue(query);
 
   const category = categories.data?.find((c) => c.id === categoryId);
+  const catById = useMemo(() => new Map((categories.data ?? []).map((c) => [c.id, c])), [categories.data]);
   const color = category?.color && /^#[0-9a-fA-F]{6}$/.test(category.color) ? category.color : colors.primary;
   const rows = useMemo(
     () => rankVenues(filterVenues(venues.data ?? [], { ...filter, query: deferred, categoryId: categoryId === 'all' ? null : categoryId })),
@@ -136,7 +137,7 @@ function VenuesByCategory({ categoryId }: { categoryId: string }) {
           <View style={{ padding: spacing.sm }}>
             <VenueCard
               venue={item}
-              category={category}
+              category={catById.get(item.categoryId) ?? category}
               now={now}
               onPress={() => {
                 haptic('selection');

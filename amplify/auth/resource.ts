@@ -1,7 +1,7 @@
 import { defineAuth } from '@aws-amplify/backend';
 
 /** Product name used in the pool-wide Cognito e-mails (one user pool serves every school). */
-const appName = process.env.APP_NAME ?? 'School Bus';
+const appName = process.env.APP_NAME ?? 'OneQ';
 const sesFromEmail = process.env.SES_FROM_EMAIL;
 const sesFromName = process.env.SES_FROM_NAME ?? appName;
 

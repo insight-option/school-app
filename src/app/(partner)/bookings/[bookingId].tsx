@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Button, Card, ConfirmSheet, EmptyState, Input, KeyValue, Screen, SkeletonCard, Text, useTheme } from '../../../ui';
 import { toast } from '../../../ui/Toast';
 import { BookingStatusBadge, CustomerHeader, VenueThumb, unitText } from '../../../components/partner/bookings';
-import { hasStarted, usePartnerBooking, usePartnerCancelBooking, useQatarClock, useRespondBooking } from '../../../features/partner';
+import { hasEnded, hasStarted, usePartnerBooking, usePartnerCancelBooking, useQatarClock, useRespondBooking } from '../../../features/partner';
 import { formatMoney } from '../../../features/platform';
 import { formatDate, formatDateTime } from '../../../lib/util/format';
 import { haptic } from '../../../lib/util/device';
@@ -57,6 +57,7 @@ export default function PartnerBookingDetail() {
     );
 
   const started = hasStarted(b, now);
+  const ended = hasEnded(b, now);
   const phoneDigits = (b.customerPhone ?? '').replace(/[^\d+]/g, '');
   const waDigits = phoneDigits.replace(/\D/g, '');
   const unit = unitText(b, t);
@@ -140,7 +141,7 @@ export default function PartnerBookingDetail() {
             {canAnswer ? (
               <View style={styles.contactRow}>
                 <Button title={t('partner.bookings.decline')} icon="close" variant="outline" onPress={() => setConfirmKind('decline')} disabled={busy} style={{ flex: 1 }} />
-                <Button title={t('partner.bookings.confirm')} icon="checkmark" variant="success" loading={respond.isPending} onPress={() => act('CONFIRMED', t('partner.bookings.confirmed'))} disabled={busy} style={{ flex: 1 }} />
+                <Button title={t('partner.bookings.confirm')} icon="checkmark" variant="success" loading={respond.isPending} onPress={() => act('CONFIRMED', t('partner.bookings.confirmed'))} disabled={busy || ended} style={{ flex: 1 }} />
               </View>
             ) : null}
             {canFinish ? (

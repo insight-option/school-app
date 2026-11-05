@@ -3,7 +3,7 @@ import { ScrollView, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
-import { Avatar, Badge, Chip, Input, ListItem, Screen, SkeletonList, useTheme } from '../../../ui';
+import { Avatar, Badge, Chip, EmptyState, Input, ListItem, Screen, SkeletonList, useTheme } from '../../../ui';
 import { toast } from '../../../ui/Toast';
 import { flattenPages, useProfilesByRole } from '../../../features/profiles';
 import { useOpenOfficeConversation } from '../../../features/messaging';
@@ -39,6 +39,7 @@ export default function AdminNewMessage() {
           data={items}
           keyExtractor={(p) => p.userId}
           onEndReached={() => q.hasNextPage && !q.isFetchingNextPage && q.fetchNextPage()}
+          ListEmptyComponent={<EmptyState icon="people-outline" title={query ? t('office.noMatches') : t('common.emptyList')} compact />}
           renderItem={({ item }) => (
             <ListItem
               title={item.fullName}

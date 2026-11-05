@@ -1,172 +1,111 @@
-import type { Schema } from '../../data/resource';
-import { audit, getDataClient, getSettings, listAll, mapLimit, nowIso, todayInTimezone, type DataClient, type DataEnv, unwrap } from '../shared/data';
-import { haversineMeters, type LatLng } from '../shared/geo';
+import { audit, getDataClient, getSettings, listAll, mapLimit, nowIso, todayInTimezone, type DataClient, unwrap } from '../shared/data';
+import { haversineMeters } from '../shared/geo';
 import { formatTime, t } from '../shared/i18n';
-import { notifyUsers } from '../shared/notify';
+import { notifyEach, notifyUsers, type PersonalNotice } from '../shared/notify';
 import { HandlerError, opName, requireIdentity, type AppSyncEvent, type Caller } from '../shared/types';
-import { fallbackRouteApi, googleRoutesApi, planRoute, type RoutableStop, type RouteApi } from './routing';
-
-type Env = DataEnv & { GOOGLE_ROUTES_API_KEY?: string };
-const env = process.env as unknown as Env;
-
-type Trip = Schema['Trip']['type'];
-type TripStop = Schema['TripStop']['type'];
-type Profile = Schema['Profile']['type'];
-type Bus = Schema['Bus']['type'];
-type StopStatus = Schema['StopStatus']['type'];
-type TripType = Schema['TripType']['type'];
-
-const ROUTE_RATE_LIMIT_MS = 30_000;
-const ROUTED_STATUSES: StopStatus[] = ['PENDING', 'ALARMED', 'ACKNOWLEDGED'];
-
-function routeApi(): RouteApi {
-  const key = env.GOOGLE_ROUTES_API_KEY;
-  if (!key || key.startsWith('<')) return fallbackRouteApi;
-  return googleRoutesApi(key);
-}
-
-function parseMeta(meta: unknown): Record<string, unknown> {
-  let v: unknown = meta;
-  for (let i = 0; i < 3 && typeof v === 'string'; i++) {
-    try {
-      v = JSON.parse(v);
-    } catch {
-      return {};
-    }
-  }
-  return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
-}
-
-async function getCallerProfile(client: DataClient, caller: Caller): Promise<Profile | null> {
-  const res = await client.models.Profile.get({ userId: caller.sub });
-  return res.data;
-}
-
-/**
- * The bus's own driver, or an office admin of the bus's school. Buses of other schools are reported as
- * missing so their existence is never revealed.
- */
-async function requireDriverOfBus(client: DataClient, caller: Caller, busId: string): Promise<{ profile: Profile; bus: Bus }> {
-  const profile = await getCallerProfile(client, caller);
-  if (!profile) throw new HandlerError('Your account is not linked to a school yet.', 'FORBIDDEN');
-  if (profile.isActive === false) throw new HandlerError('Account disabled', 'FORBIDDEN');
-  const bus = (await client.models.Bus.get({ busId })).data;
-  if (!bus || bus.schoolId !== profile.schoolId) throw new HandlerError('Bus not found', 'NOT_FOUND');
-  if (caller.isAdmin && profile.role === 'ADMIN') return { profile, bus };
-  if (profile.role !== 'DRIVER' || profile.busId !== busId) throw new HandlerError('Only the driver of this bus can do that', 'FORBIDDEN');
-  return { profile, bus };
-}
-
-async function loadStops(client: DataClient, tripId: string): Promise<TripStop[]> {
-  return listAll((nextToken) => client.models.TripStop.listStopsByTrip({ tripId }, { limit: 200, nextToken }));
-}
-
-/** A usable GPS fix sent by the driver device (finite, in range, not the 0/0 placeholder). */
-function validLatLng(lat?: number | null, lng?: number | null): LatLng | null {
-  if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  if (Math.abs(lat) > 90 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) return null;
-  return { lat, lng };
-}
-
-/**
- * Where the route starts: the driver's live fix sent with the request, else the bus's last
- * published position, else where the trip started, else the school.
- */
-async function busOrigin(client: DataClient, trip: Trip, hint?: LatLng | null): Promise<LatLng> {
-  if (hint) return hint;
-  const loc = await client.models.BusLocation.get({ busId: trip.busId });
-  if (loc.data && (loc.data.lat !== 0 || loc.data.lng !== 0)) return { lat: loc.data.lat, lng: loc.data.lng };
-  if (trip.startLocation) return trip.startLocation;
-  const settings = await getSettings(client, trip.schoolId);
-  return settings?.schoolLocation ?? { lat: 0, lng: 0 };
-}
-
-/** Record the driver's position so the live map and the next route start from the right place. */
-async function upsertBusLocation(client: DataClient, busId: string, schoolId: string, driverUserId: string, pos: LatLng, tripId: string | null) {
-  const existing = await client.models.BusLocation.get({ busId });
-  const base = { busId, schoolId, lat: pos.lat, lng: pos.lng, updatedAt: nowIso(), tripId };
-  if (existing.data) await client.models.BusLocation.update(base);
-  else await client.models.BusLocation.create({ ...base, driverUserId, heading: 0, speed: 0, accuracy: 0 });
-}
-
-/** Compute + persist the route for a trip. Returns the refreshed Trip. */
-async function recompute(
-  client: DataClient,
-  trip: Trip,
-  opts: { manualOrder?: string[]; force?: boolean; reason: string; origin?: LatLng | null },
-): Promise<Trip> {
-  if (trip.status !== 'ACTIVE' && trip.status !== 'PLANNED') return trip;
-  const meta = parseMeta(trip.routeMeta);
-  const last = typeof meta.computedAt === 'string' ? Date.parse(meta.computedAt) : 0;
-  if (!opts.force && !opts.manualOrder && Date.now() - last < ROUTE_RATE_LIMIT_MS) return trip; // rate-limited: serve cached
-
-  const [stops, settings, origin] = await Promise.all([loadStops(client, trip.id), getSettings(client, trip.schoolId), busOrigin(client, trip, opts.origin)]);
-  const routable: RoutableStop[] = stops
-    .filter((s) => ROUTED_STATUSES.includes(s.status) && s.location)
-    .map((s) => ({ id: s.id, location: { lat: s.location!.lat, lng: s.location!.lng } }));
-  const finalDestination = trip.type === 'MORNING_PICKUP' ? (settings?.schoolLocation ?? null) : null;
-  const manualOrder = opts.manualOrder ?? (meta.manualOrder === true && !opts.force ? (meta.manualOrderIds as string[] | undefined) : undefined);
-
-  const plan = await planRoute({ origin, stops: routable, finalDestination, optimize: !manualOrder, manualOrder }, routeApi());
-
-  const planned = new Map(plan.stops.map((p) => [p.id, p]));
-  let tail = plan.stops.length;
-  await mapLimit(stops, 8, async (s) => {
-    const p = planned.get(s.id);
-    if (p) {
-      if (s.order !== p.order || s.etaSeconds !== p.etaSeconds || s.distanceMeters !== p.distanceMeters) {
-        await client.models.TripStop.update({ id: s.id, order: p.order, etaSeconds: p.etaSeconds, distanceMeters: p.distanceMeters });
-      }
-    } else if (ROUTED_STATUSES.includes(s.status)) {
-      // routed status but no location → keep at the end so the driver still sees it
-      tail++;
-      if (s.order !== 900 + tail) await client.models.TripStop.update({ id: s.id, order: 900 + tail, etaSeconds: null, distanceMeters: null });
-    } else if (s.order < 900) {
-      tail++;
-      await client.models.TripStop.update({ id: s.id, order: 900 + tail });
-    }
-  });
-
-  const routeMeta = {
-    distanceMeters: plan.distanceMeters,
-    durationSeconds: plan.durationSeconds,
-    computedAt: plan.computedAt,
-    source: plan.source,
-    chunks: plan.chunks,
-    optimized: plan.optimized,
-    manualOrder: !!manualOrder,
-    manualOrderIds: manualOrder ?? undefined,
-    optimizedOrder: plan.stops.map((s) => s.id),
-    stopCount: plan.stops.length,
-    reason: opts.reason,
-    warnings: plan.warnings,
-    traffic: plan.traffic,
-    origin,
-  };
-  return unwrap(await client.models.Trip.update({ id: trip.id, routePolyline: plan.polyline, routeMeta: JSON.stringify(routeMeta) }), 'Trip.update');
-}
+import {
+  NO_HOME_REASON,
+  ROUTED_STATUSES,
+  env,
+  getCallerProfile,
+  googleKey,
+  loadStops,
+  recompute,
+  requireDriverOfBus,
+  upsertBusLocation,
+  validLatLng,
+  type Profile,
+  type StopStatus,
+  type Trip,
+  type TripStop,
+  type TripType,
+} from './core';
+import { notifyDriverOfDayChanges, reverseGeocode, setDayStatus, syncStopsWithDayStatus, updateHomeLocation } from './pickup';
 
 // ────────────────────────────── operations ──────────────────────────────
-async function startTrip(client: DataClient, caller: Caller, args: { busId: string; type: TripType; lat?: number | null; lng?: number | null }): Promise<Trip> {
+/** "Your bus is on the way" to every rider of the trip, in their language and with their own ETA. */
+async function announceTripStart(client: DataClient, trip: Trip, riders: Profile[]) {
+  const stops = await loadStops(client, trip.id);
+  const byStudent = new Map(stops.map((s) => [s.studentId, s]));
+  const notices: PersonalNotice[] = [];
+  for (const r of riders) {
+    const stop = byStudent.get(r.userId);
+    if (!stop || stop.status === 'ABSENT') continue;
+    const s = t(r.language);
+    const data = {
+      tripId: trip.id,
+      tripStopId: stop.id,
+      busId: trip.busId,
+      kind: 'TRIP_STARTED',
+    };
+    if (stop.status === 'SKIPPED') {
+      notices.push({
+        userId: r.userId,
+        title: s.tripNoHomeTitle,
+        body: s.tripNoHomeBody,
+        data: { ...data, kind: 'TRIP_NO_HOME' },
+      });
+      continue;
+    }
+    const min = stop.etaSeconds != null ? Math.max(1, Math.round(stop.etaSeconds / 60)) : null;
+    const driver = trip.driverName ?? '';
+    notices.push(
+      trip.type === 'MORNING_PICKUP'
+        ? {
+            userId: r.userId,
+            title: s.tripStartedMorningTitle,
+            body: s.tripStartedMorningBody(driver, min),
+            data: { ...data, etaSeconds: stop.etaSeconds ?? null },
+          }
+        : {
+            userId: r.userId,
+            title: s.tripStartedAfternoonTitle,
+            body: s.tripStartedAfternoonBody(driver),
+            data,
+          },
+    );
+  }
+  await notifyEach(client, { schoolId: trip.schoolId, type: 'TRIP', notices });
+}
+
+async function startTrip(
+  client: DataClient,
+  caller: Caller,
+  args: {
+    busId: string;
+    type: TripType;
+    lat?: number | null;
+    lng?: number | null;
+  },
+): Promise<Trip> {
   const { profile, bus } = await requireDriverOfBus(client, caller, args.busId);
   const settings = await getSettings(client, bus.schoolId);
   const date = todayInTimezone(settings?.timezone);
   const here = validLatLng(args.lat, args.lng);
 
-  const todays = await listAll((nextToken) => client.models.Trip.listTripsByBusAndDate({ busId: args.busId, date: { eq: date } }, { limit: 20, nextToken }));
+  const [todays, loc] = await Promise.all([
+    listAll((nextToken) => client.models.Trip.listTripsByBusAndDate({ busId: args.busId, date: { eq: date } }, { limit: 20, nextToken })),
+    client.models.BusLocation.get({ busId: args.busId }),
+  ]);
   const active = todays.find((x) => x.status === 'ACTIVE');
   if (active) {
     if (active.type === args.type) {
       // Idempotent re-start (e.g. the app was reopened): still re-anchor the route to where the driver is now.
-      return here ? recompute(client, active, { force: true, reason: 'restart', origin: here }) : active;
+      return here
+        ? recompute(client, active, {
+            force: true,
+            reason: 'restart',
+            origin: here,
+          })
+        : active;
     }
     throw new HandlerError('End the current trip before starting another one', 'CONFLICT');
   }
 
-  const loc = await client.models.BusLocation.get({ busId: args.busId });
   // The trip starts where the driver is: the live fix from the device, else the bus's last published
   // position, else the school. The live fix is also written to BusLocation so parents see the bus there.
-  const startLocation = here ?? (loc.data && (loc.data.lat || loc.data.lng) ? { lat: loc.data.lat, lng: loc.data.lng } : (settings?.schoolLocation ?? undefined));
+  const startLocation =
+    here ?? (loc.data && (loc.data.lat || loc.data.lng) ? { lat: loc.data.lat, lng: loc.data.lng } : (settings?.schoolLocation ?? undefined));
   const trip = unwrap(
     await client.models.Trip.create({
       busId: args.busId,
@@ -184,10 +123,21 @@ async function startTrip(client: DataClient, caller: Caller, args: { busId: stri
     }),
     'Trip.create',
   );
+  // Publish the bus position first so riders opening the push see the bus immediately.
+  const publish = here
+    ? upsertBusLocation(client, args.busId, bus.schoolId, bus.driverUserId ?? caller.sub, here, trip.id)
+    : loc.data
+      ? client.models.BusLocation.update({
+          busId: args.busId,
+          tripId: trip.id,
+          schoolId: bus.schoolId,
+        })
+      : Promise.resolve();
 
   const [students, dayStatuses] = await Promise.all([
     listAll((nextToken) => client.models.Profile.listProfilesByBus({ busId: args.busId }, { limit: 200, nextToken })),
     listAll((nextToken) => client.models.StudentDayStatus.listDayStatusByBusAndDate({ busId: args.busId, date: { eq: date } }, { limit: 200, nextToken })),
+    publish,
   ]);
   const notGoing = new Set(dayStatuses.filter((d) => d.status === 'NOT_GOING').map((d) => d.studentId));
   const riders = students.filter((s) => s.role === 'STUDENT' && s.isActive !== false);
@@ -204,19 +154,33 @@ async function startTrip(client: DataClient, caller: Caller, args: { busId: stri
       parentPhone: s.parentPhone ?? undefined,
       homeAddress: s.homeAddress ?? undefined,
       location: s.homeLocation ?? undefined,
+      pickupLabel: s.homeLabel ?? undefined,
+      pickupNote: s.homeNote ?? undefined,
       order: absent || noHome ? 900 + i : i + 1,
       status: absent ? 'ABSENT' : noHome ? 'SKIPPED' : 'PENDING',
-      skipReason: noHome ? 'No home location set' : undefined,
+      skipReason: noHome ? NO_HOME_REASON : undefined,
       skippedAt: noHome ? nowIso() : undefined,
       alarmCount: 0,
     });
   });
-  await client.models.Trip.update({ id: trip.id, stopCount: riders.length });
-  if (here) await upsertBusLocation(client, args.busId, bus.schoolId, bus.driverUserId ?? caller.sub, here, trip.id);
-  else if (loc.data) await client.models.BusLocation.update({ busId: args.busId, tripId: trip.id });
-
-  const routed = await recompute(client, { ...trip, stopCount: riders.length }, { force: true, reason: 'start', origin: here });
-  await audit(client, { schoolId: bus.schoolId, actorId: caller.sub, actorName: caller.username, action: 'START_TRIP', entityType: 'Trip', entityId: trip.id, after: { type: args.type, date } });
+  const counted = unwrap(await client.models.Trip.update({ id: trip.id, stopCount: riders.length }), 'Trip.update');
+  const routed = await recompute(client, counted, {
+    force: true,
+    reason: 'start',
+    origin: here,
+  });
+  await Promise.all([
+    announceTripStart(client, routed, riders).catch((e) => console.error('trip start notifications failed', e)),
+    audit(client, {
+      schoolId: bus.schoolId,
+      actorId: caller.sub,
+      actorName: caller.username,
+      action: 'START_TRIP',
+      entityType: 'Trip',
+      entityId: trip.id,
+      after: { type: args.type, date },
+    }),
+  ]);
   return routed;
 }
 
@@ -228,19 +192,68 @@ async function endTrip(client: DataClient, caller: Caller, args: { tripId: strin
   await mapLimit(
     stops.filter((s) => ROUTED_STATUSES.includes(s.status)),
     8,
-    (s) => client.models.TripStop.update({ id: s.id, status: 'SKIPPED', skippedAt: nowIso(), skipReason: 'Trip ended' }),
+    (s) =>
+      client.models.TripStop.update({
+        id: s.id,
+        status: 'SKIPPED',
+        skippedAt: nowIso(),
+        skipReason: 'Trip ended',
+      }),
   );
-  const updated = unwrap(await client.models.Trip.update({ id: trip.id, status: 'COMPLETED', endedAt: nowIso() }), 'Trip.update');
+  const endedAt = nowIso();
+  const updated = unwrap(
+    await client.models.Trip.update({
+      id: trip.id,
+      status: 'COMPLETED',
+      endedAt,
+    }),
+    'Trip.update',
+  );
   const loc = await client.models.BusLocation.get({ busId: trip.busId });
   if (loc.data) await client.models.BusLocation.update({ busId: trip.busId, tripId: null });
-  await audit(client, { schoolId: trip.schoolId, actorId: caller.sub, actorName: caller.username, action: 'END_TRIP', entityType: 'Trip', entityId: trip.id });
+  // Morning trip: the riders who boarded are now at school.
+  const arrived = trip.type === 'MORNING_PICKUP' ? stops.filter((s) => s.status === 'BOARDED') : [];
+  if (arrived.length) {
+    const [settings, profiles] = await Promise.all([
+      getSettings(client, trip.schoolId),
+      mapLimit(arrived, 8, (s) => client.models.Profile.get({ userId: s.studentId }).then((r) => r.data)),
+    ]);
+    const notices: PersonalNotice[] = arrived.map((s, i) => {
+      const lang = profiles[i]?.language;
+      const str = t(lang);
+      return {
+        userId: s.studentId,
+        title: str.arrivedSchoolTitle,
+        body: str.arrivedSchoolBody(s.studentName, formatTime(endedAt, settings?.timezone, lang)),
+        data: { tripId: trip.id, tripStopId: s.id, kind: 'ARRIVED_SCHOOL' },
+      };
+    });
+    await notifyEach(client, {
+      schoolId: trip.schoolId,
+      type: 'TRIP',
+      notices,
+    }).catch((e) => console.error('arrival notifications failed', e));
+  }
+  await audit(client, {
+    schoolId: trip.schoolId,
+    actorId: caller.sub,
+    actorName: caller.username,
+    action: 'END_TRIP',
+    entityType: 'Trip',
+    entityId: trip.id,
+  });
   return updated;
 }
 
 async function computeTripRoute(
   client: DataClient,
   caller: Caller,
-  args: { tripId: string; force?: boolean | null; lat?: number | null; lng?: number | null },
+  args: {
+    tripId: string;
+    force?: boolean | null;
+    lat?: number | null;
+    lng?: number | null;
+  },
 ): Promise<Trip> {
   const trip = unwrap(await client.models.Trip.get({ id: args.tripId }), 'Trip.get');
   // Drivers, admins and the students of this bus may request a recompute (students after toggling
@@ -255,7 +268,15 @@ async function computeTripRoute(
   // Only the driver's own device knows where the bus is; ignore positions sent by anyone else.
   const here = isDriver || caller.isAdmin ? validLatLng(args.lat, args.lng) : null;
   if (here && isDriver && trip.status === 'ACTIVE') await upsertBusLocation(client, trip.busId, trip.schoolId, caller.sub, here, trip.id);
-  return recompute(client, trip, { force: !!args.force && caller.isAdmin, reason: caller.isAdmin ? 'admin' : 'request', origin: here });
+  // "Not going today" / "going again" toggled during the trip: update the stops before routing.
+  const changed = await syncStopsWithDayStatus(client, trip);
+  const routed = await recompute(client, trip, {
+    force: changed.length > 0 || (!!args.force && caller.isAdmin),
+    reason: changed.length ? 'day-status' : caller.isAdmin ? 'admin' : 'request',
+    origin: here,
+  });
+  await notifyDriverOfDayChanges(client, trip, changed).catch((e) => console.error('driver notice failed', e));
+  return routed;
 }
 
 async function updateTripStop(client: DataClient, caller: Caller, args: { tripStopId: string; status: StopStatus; reason?: string | null }): Promise<TripStop> {
@@ -267,7 +288,10 @@ async function updateTripStop(client: DataClient, caller: Caller, args: { tripSt
   if (!allowed.includes(args.status)) throw new HandlerError(`Status ${args.status} cannot be set manually`, 'VALIDATION');
 
   const now = nowIso();
-  const patch: Partial<TripStop> & { id: string } = { id: stop.id, status: args.status };
+  const patch: Partial<TripStop> & { id: string } = {
+    id: stop.id,
+    status: args.status,
+  };
   if (args.status === 'BOARDED') patch.boardedAt = now;
   if (args.status === 'DROPPED') patch.droppedAt = now;
   if (args.status === 'SKIPPED') {
@@ -278,11 +302,17 @@ async function updateTripStop(client: DataClient, caller: Caller, args: { tripSt
   const updated = unwrap(await client.models.TripStop.update(patch), 'TripStop.update');
 
   if (args.status === 'BOARDED' || args.status === 'DROPPED') {
-    if (args.status === 'BOARDED' && stop.status !== 'BOARDED') {
-      await client.models.Trip.update({ id: trip.id, boardedCount: (trip.boardedCount ?? 0) + 1 });
-    }
-    const student = await client.models.Profile.get({ userId: stop.studentId });
-    const settings = await getSettings(client, trip.schoolId);
+    const boardedDelta = args.status === 'BOARDED' && stop.status !== 'BOARDED' ? 1 : 0;
+    const [student, settings] = await Promise.all([
+      client.models.Profile.get({ userId: stop.studentId }),
+      getSettings(client, trip.schoolId),
+      boardedDelta
+        ? client.models.Trip.update({
+            id: trip.id,
+            boardedCount: (trip.boardedCount ?? 0) + boardedDelta,
+          })
+        : Promise.resolve(null),
+    ]);
     const s = t(student.data?.language);
     const time = formatTime(now, settings?.timezone, student.data?.language);
     await notifyUsers(client, {
@@ -303,7 +333,10 @@ async function reorderTripStops(client: DataClient, caller: Caller, args: { trip
   await requireDriverOfBus(client, caller, trip.busId);
   const ids = args.stopIds.filter((x): x is string => !!x);
   if (!ids.length) throw new HandlerError('No stops', 'VALIDATION');
-  return recompute(client, trip, { manualOrder: ids, reason: 'manual-reorder' });
+  return recompute(client, trip, {
+    manualOrder: ids,
+    reason: 'manual-reorder',
+  });
 }
 
 async function notifyBusNear(client: DataClient, caller: Caller, args: { tripStopId: string }) {
@@ -328,16 +361,29 @@ async function notifyBusNear(client: DataClient, caller: Caller, args: { tripSto
     data: { tripId: trip.id, tripStopId: stop.id, etaSeconds: stop.etaSeconds },
     push: true,
   });
-  await client.models.TripStop.update({ id: stop.id, nearNotifiedAt: nowIso() });
+  await client.models.TripStop.update({
+    id: stop.id,
+    nearNotifiedAt: nowIso(),
+  });
   return { ok: true };
 }
 
-async function searchPlaces(args: { query: string; lat?: number | null; lng?: number | null }) {
-  const key = env.GOOGLE_ROUTES_API_KEY;
+async function searchPlaces(args: { query: string; lat?: number | null; lng?: number | null; language?: string | null }) {
+  const key = googleKey();
   const q = (args.query ?? '').trim();
-  if (!key || key.startsWith('<') || q.length < 2) return { places: [] };
-  const body: Record<string, unknown> = { textQuery: q, maxResultCount: 8, languageCode: 'en' };
-  if (args.lat != null && args.lng != null) body.locationBias = { circle: { center: { latitude: args.lat, longitude: args.lng }, radius: 30000 } };
+  if (!key || q.length < 2) return { places: [] };
+  const body: Record<string, unknown> = {
+    textQuery: q,
+    maxResultCount: 8,
+    languageCode: args.language === 'ar' ? 'ar' : 'en',
+  };
+  if (args.lat != null && args.lng != null)
+    body.locationBias = {
+      circle: {
+        center: { latitude: args.lat, longitude: args.lng },
+        radius: 30000,
+      },
+    };
   const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
     method: 'POST',
     headers: {
@@ -352,7 +398,12 @@ async function searchPlaces(args: { query: string; lat?: number | null; lng?: nu
     return { places: [] };
   }
   const json = (await res.json()) as {
-    places?: { id?: string; displayName?: { text?: string }; formattedAddress?: string; location?: { latitude: number; longitude: number } }[];
+    places?: {
+      id?: string;
+      displayName?: { text?: string };
+      formattedAddress?: string;
+      location?: { latitude: number; longitude: number };
+    }[];
   };
   return {
     places: (json.places ?? []).map((p) => ({
@@ -385,6 +436,12 @@ export const handler = async (event: AppSyncEvent<Record<string, unknown>>) => {
         return await notifyBusNear(client, caller, args);
       case 'searchPlaces':
         return await searchPlaces(args);
+      case 'reverseGeocode':
+        return await reverseGeocode(args);
+      case 'updateHomeLocation':
+        return await updateHomeLocation(client, caller, args);
+      case 'setDayStatus':
+        return await setDayStatus(client, caller, args);
       default:
         throw new HandlerError(`Unknown operation ${opName(event)}`);
     }

@@ -1,9 +1,9 @@
 /** Time zones offered in school settings and the set-up wizard (school day, trip dates). */
 export const TIMEZONES = [
+  'Asia/Qatar',
   'Asia/Riyadh',
   'Asia/Dubai',
   'Asia/Kuwait',
-  'Asia/Qatar',
   'Asia/Bahrain',
   'Asia/Muscat',
   'Asia/Amman',
@@ -18,7 +18,7 @@ export const TIMEZONES = [
   'UTC',
 ] as const;
 
-/** The device's time zone when we offer it, otherwise Riyadh. */
+/** The device's time zone when we offer it, otherwise Qatar. */
 export function defaultTimezone(): string {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -26,5 +26,5 @@ export function defaultTimezone(): string {
   } catch {
     // Intl without time zone support
   }
-  return 'Asia/Riyadh';
+  return 'Asia/Qatar';
 }

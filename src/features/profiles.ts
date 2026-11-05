@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client, listAll, unwrap, type Profile, type Role } from '../lib/data/client';
 import { qk } from '../lib/query/client';
@@ -20,6 +21,9 @@ const PROFILE_SELECTION = [
   'parentPhone',
   'homeLocation.*',
   'homeAddress',
+  'homePlaceId',
+  'homeLabel',
+  'homeNote',
   'isActive',
   'language',
   'grade',
@@ -71,6 +75,22 @@ export function useProfilesByBus(busId: string | null | undefined) {
       return (rows as unknown as Profile[]).filter((p) => p.role === 'STUDENT');
     },
   });
+}
+
+/** Driver map: a rider who switches their pickup point moves on the map at once. */
+export function useBusProfilesSubscription(busId: string | null | undefined, enabled = true) {
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (!busId || !enabled) return;
+    const sub = client.models.Profile.onUpdate({ filter: { busId: { eq: busId } } }).subscribe({
+      next: (p) => {
+        if (p.role !== 'STUDENT') return;
+        qc.setQueryData<Profile[]>(qk.profilesByBus(busId), (old) => old?.map((x) => (x.userId === p.userId ? { ...x, ...p } : x)) ?? old);
+      },
+      error: (e) => console.warn('bus profiles sub', e),
+    });
+    return () => sub.unsubscribe();
+  }, [busId, enabled, qc]);
 }
 
 type ProfilePage = { items: Profile[]; nextToken: string | null };

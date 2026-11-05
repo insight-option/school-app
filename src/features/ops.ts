@@ -48,7 +48,12 @@ export function useSaveCourse() {
 export function useDeleteCourse() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => unwrap(await client.models.Course.delete({ id }), 'course'),
+    mutationFn: async (id: string) => {
+      // Lessons belong to the course – remove them too instead of leaving orphans behind.
+      const lessons = await listAll((nextToken) => client.models.CourseLesson.listLessonsByCourse({ courseId: id }, { limit: 100, nextToken }));
+      await Promise.all(lessons.map((l) => client.models.CourseLesson.delete({ id: l.id })));
+      return unwrap(await client.models.Course.delete({ id }), 'course');
+    },
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['courses'] }),
   });
 }
@@ -167,7 +172,13 @@ export function useStartImport() {
         'import job',
       );
       if (!job) throw new Error('job not created');
-      await client.mutations.createStudentsBulk({ jobId: job.id, rowsJson: JSON.stringify(input.rows) });
+      const res = await client.mutations.createStudentsBulk({ jobId: job.id, rowsJson: JSON.stringify(input.rows) });
+      if (res.errors?.length) {
+        // The async invoke was rejected: mark the job failed instead of leaving it "pending" forever.
+        const message = res.errors.map((e) => e.message).join('; ');
+        await client.models.ImportJob.update({ id: job.id, status: 'FAILED', error: message, finishedAt: new Date().toISOString() });
+        throw new Error(message);
+      }
       return job;
     },
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['importJobs'] }),
@@ -193,6 +204,12 @@ export function useImportJob(jobId: string | null | undefined) {
     });
     return () => sub.unsubscribe();
   }, [jobId, qc]);
+  // New students exist once the job finishes: refresh the lists that show them.
+  const done = q.data?.status === 'COMPLETED' || q.data?.status === 'FAILED';
+  useEffect(() => {
+    if (!done) return;
+    for (const key of ['profiles', 'classes', 'buses']) void qc.invalidateQueries({ queryKey: [key] });
+  }, [done, qc]);
   return q;
 }
 

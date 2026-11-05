@@ -88,14 +88,15 @@ export default function AdminStudentDetail() {
             <KeyValue label={t('admin.parentPhone')} value={p.parentPhone} />
             <KeyValue label={t('admin.grade')} value={p.grade} />
             <KeyValue label={t('admin.homeAddress')} value={p.homeAddress} />
-            <KeyValue label={t('common.language')} value={p.language} />
+            <KeyValue label={t('common.language')} value={p.language ? t(`office.languages.${p.language}`, { defaultValue: p.language }) : null} />
           </Card>
 
           <SectionHeader title={t('admin.homeLocation')} action={t('admin.setHome')} onAction={() => setHomeOpen(true)} />
           <Card padding={0} style={{ overflow: 'hidden' }}>
             {p.homeLocation ? (
               <View style={{ height: 200 }} pointerEvents="none">
-                <MapView markers={[{ id: 'home', kind: 'home', lat: p.homeLocation.lat, lng: p.homeLocation.lng }]} initialRegion={{ ...p.homeLocation, latitudeDelta: 0.01, longitudeDelta: 0.01 }} />
+                {/* keyed on the coordinates so the preview re-centres after the home moves */}
+                <MapView key={`${p.homeLocation.lat.toFixed(5)},${p.homeLocation.lng.toFixed(5)}`} markers={[{ id: 'home', kind: 'home', lat: p.homeLocation.lat, lng: p.homeLocation.lng }]} initialRegion={{ ...p.homeLocation, latitudeDelta: 0.01, longitudeDelta: 0.01 }} />
               </View>
             ) : (
               <Text color="textMuted" style={{ padding: theme.spacing.lg }}>
@@ -151,7 +152,7 @@ export default function AdminStudentDetail() {
 
       <Sheet visible={homeOpen} onClose={() => setHomeOpen(false)} title={t('admin.setHome')} scroll={false} maxHeightFraction={0.95}>
         <View style={{ height: 480 }}>
-          <HomeLocationPicker initial={p?.homeLocation ?? null} initialAddress={p?.homeAddress} fallbackCenter={settings.data?.schoolLocation ?? null} busy={updateHome.isPending} confirmLabel={t('common.save')} onConfirm={(v) => updateHome.mutate({ ...v, userId: id }, { onSuccess: () => setHomeOpen(false), onError: (e) => toast.error(e.message) })} />
+          <HomeLocationPicker key={homeOpen ? 'open' : 'closed'} initial={p?.homeLocation ?? null} initialAddress={p?.homeAddress} fallbackCenter={settings.data?.schoolLocation ?? null} busy={updateHome.isPending} confirmLabel={t('common.save')} onConfirm={(v) => updateHome.mutate({ ...v, userId: id }, { onSuccess: () => setHomeOpen(false), onError: (e) => toast.error(e.message) })} />
         </View>
       </Sheet>
     </Screen>

@@ -43,7 +43,7 @@ export function InboxList({ seatUserId, header, emptyTitle, emptyBody }: { seatU
       data={inbox.data ?? []}
       keyExtractor={(m) => m.conversationId}
       renderItem={render}
-      ListHeaderComponent={<>{header}</>}
+      ListHeaderComponent={<View style={{ width: '100%' }}>{header}</View>}
       ListEmptyComponent={<EmptyState icon="chatbubbles-outline" title={emptyTitle ?? t('chat.inboxEmpty')} body={emptyBody ?? t('chat.inboxEmptyBody')} />}
       refreshing={inbox.isRefetching}
       onRefresh={() => inbox.refetch()}

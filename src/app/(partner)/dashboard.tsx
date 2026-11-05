@@ -45,7 +45,7 @@ export default function PartnerDashboard() {
 
   const all = useMemo(() => bookings.data ?? [], [bookings.data]);
   const stats = useMemo(() => dashboardStats(all, now), [all, now]);
-  const pending = useMemo(() => all.filter((b) => b.status === 'PENDING' && b.date >= now.date), [all, now.date]);
+  const pending = useMemo(() => all.filter((b) => b.status === 'PENDING' && !hasEnded(b, now)), [all, now]);
   const today = useMemo(() => all.filter((b) => b.date === now.date && (b.status === 'CONFIRMED' || b.status === 'COMPLETED' || b.status === 'PENDING')), [all, now.date]);
   const upcoming = useMemo(() => all.filter((b) => b.status === 'CONFIRMED' && b.date > now.date).slice(0, 5), [all, now.date]);
   const venueList = venues.data ?? [];

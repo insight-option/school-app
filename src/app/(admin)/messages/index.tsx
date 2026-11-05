@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
-import { Avatar, Button, Chip, ListItem, Screen, Sheet, useTheme } from '../../../ui';
+import { Avatar, Button, Chip, EmptyState, ListItem, Screen, Sheet, SkeletonList, useTheme } from '../../../ui';
 import { InboxList } from '../../../components/chat/InboxList';
 import { useGroupConversations, useOfficeSeat } from '../../../features/messaging';
 import { useMessageReports, useResolveReport } from '../../../features/ops';
@@ -36,6 +36,7 @@ export default function AdminMessages() {
       ) : tab === 'groups' ? (
         <ScrollView>
           {header}
+          {groups.isLoading && !groups.data ? <SkeletonList /> : !groups.data?.length ? <EmptyState icon="people-outline" title={t('office.noGroups')} compact /> : null}
           {(groups.data ?? []).map((c) => (
             <ListItem key={c.id} title={c.title} subtitle={c.lastMessageText ? `${c.lastMessageSenderName ?? ''}: ${c.lastMessageText}` : t('chat.noMessages')} meta={c.lastMessageText ? timeAgoShort(c.lastMessageAt) : undefined} left={<Avatar name={c.title} icon={c.type === 'CLASS_GROUP' ? 'people' : 'bus'} color={theme.colors.accent} />} chevron onPress={() => router.push(`/chat/${c.id}` as never)} />
           ))}
@@ -43,6 +44,7 @@ export default function AdminMessages() {
       ) : (
         <ScrollView>
           {header}
+          {reports.isLoading && !reports.data ? <SkeletonList avatar={false} /> : !reports.data?.length ? <EmptyState icon="flag-outline" title={t('office.noReports')} body={t('office.noReportsBody')} compact /> : null}
           {(reports.data ?? []).map((r) => (
             <ListItem
               key={r.id}

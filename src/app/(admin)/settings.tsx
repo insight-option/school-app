@@ -14,7 +14,8 @@ import { TIMEZONES } from '../../lib/timezones';
 import { SES_FROM_EMAIL } from '../../lib/amplify';
 import type { LatLng } from '../../lib/geo';
 
-const COLORS = ['#2563EB', '#0891B2', '#16A34A', '#7C3AED', '#DB2777', '#EA580C', '#0F766E', '#4F46E5'];
+const COLORS = ['#8A1538', '#2563EB', '#0891B2', '#16A34A', '#7C3AED', '#DB2777', '#EA580C', '#0F766E', '#4F46E5'];
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export default function AdminSettings() {
   const { t } = useTranslation();
@@ -33,6 +34,7 @@ export default function AdminSettings() {
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setPatch((p) => ({ ...p, [k]: v }));
 
   const submit = () => {
+    if (!HHMM.test(form.morningTripStart ?? '') || !HHMM.test(form.afternoonTripStart ?? '')) return toast.error(t('office.invalidTime'));
     save.mutate(
       {
         name: form.name.trim() || DEFAULT_SETTINGS.name,
@@ -51,6 +53,8 @@ export default function AdminSettings() {
       {
         onSuccess: () => {
           toast.success(t('common.success'));
+          setPatch({});
+          setLocationEdit(undefined);
           // Keep the public directory listing in step with the operational settings.
           saveProfile.mutate(
             {
@@ -97,10 +101,11 @@ export default function AdminSettings() {
           <Text variant="captionStrong" color="textMuted">
             {t('admin.primaryColor')}
           </Text>
-          <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+          <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             {COLORS.map((c) => (
-              <Button key={c} title="" onPress={() => set('primaryColor', c)} style={{ width: 36, height: 36, minHeight: 36, borderRadius: 18, backgroundColor: c, borderWidth: form.primaryColor === c ? 3 : 0, borderColor: theme.colors.text, paddingHorizontal: 0 }} />
+              <Button key={c} title="" accessibilityLabel={c} onPress={() => set('primaryColor', c)} style={{ width: 36, height: 36, minHeight: 36, borderRadius: 18, backgroundColor: c, borderWidth: form.primaryColor === c ? 3 : 0, borderColor: theme.colors.text, paddingHorizontal: 0 }} />
             ))}
+            <Chip label={t('office.defaultColor')} selected={!form.primaryColor} onPress={() => set('primaryColor', null)} />
           </View>
         </Card>
 

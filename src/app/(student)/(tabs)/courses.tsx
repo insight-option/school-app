@@ -8,6 +8,7 @@ import { useMyProfile } from '../../../features/profiles';
 import { useCoursesForClass } from '../../../features/ops';
 import { useSignedUrl } from '../../../lib/storage/s3';
 import { Image } from 'expo-image';
+import { StudentTopBar } from '../../../components/places/PickupSwitcher';
 
 /** "My Courses": shows a friendly coming-soon state until the office publishes courses for the class. */
 export default function StudentCourses() {
@@ -18,7 +19,7 @@ export default function StudentCourses() {
   const courses = useCoursesForClass(me.data?.classId);
 
   return (
-    <Screen title={t('tabs.courses')} scroll>
+    <Screen topBar={<StudentTopBar />} title={t('tabs.courses')} scroll>
       {courses.isLoading && !courses.data ? (
         <View style={{ gap: theme.spacing.md }}>
           <SkeletonCard />

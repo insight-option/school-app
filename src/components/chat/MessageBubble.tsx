@@ -121,8 +121,9 @@ export const MessageBubble = memo(function MessageBubble({ message: m, mine, sho
           {
             backgroundColor: bg,
             borderRadius: radius.lg,
-            borderBottomRightRadius: mine ? 6 : radius.lg,
-            borderBottomLeftRadius: mine ? radius.lg : 6,
+            // start/end so the "tail" corner follows the bubble side in Arabic (RTL) too
+            borderBottomEndRadius: mine ? 6 : radius.lg,
+            borderBottomStartRadius: mine ? radius.lg : 6,
             borderWidth: mine ? 0 : 1,
             borderColor: colors.border,
             opacity: status === 'sending' || status === 'uploading' ? 0.85 : 1,

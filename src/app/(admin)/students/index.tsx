@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { ScrollView, View, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Button, Chip, Input, Screen, Select, useTheme } from '../../../ui';
@@ -11,6 +11,8 @@ export default function AdminStudents() {
   const { t } = useTranslation();
   const theme = useTheme();
   const router = useRouter();
+  // Phones: icon-only header actions so the title is not squeezed to "St…".
+  const compact = useWindowDimensions().width < 600;
   const [query, setQuery] = useState('');
   const [classId, setClassId] = useState<string | null>(null);
   const [busId, setBusId] = useState<string | null>(null);
@@ -51,8 +53,8 @@ export default function AdminStudents() {
       title={t('admin.students')}
       right={
         <View style={{ flexDirection: 'row', gap: 6 }}>
-          <Button size="sm" variant="secondary" icon="cloud-upload-outline" title={t('admin.bulkImport')} onPress={() => router.push('/(admin)/students/import')} />
-          <Button size="sm" icon="person-add" title={t('admin.addStudent')} onPress={() => router.push('/(admin)/students/new')} />
+          <Button size="sm" variant="secondary" icon="cloud-upload-outline" title={compact ? '' : t('admin.bulkImport')} accessibilityLabel={t('admin.bulkImport')} onPress={() => router.push('/(admin)/students/import')} />
+          <Button size="sm" icon="person-add" title={compact ? '' : t('admin.addStudent')} accessibilityLabel={t('admin.addStudent')} onPress={() => router.push('/(admin)/students/new')} />
         </View>
       }
     >
@@ -64,7 +66,7 @@ export default function AdminStudents() {
         emptyTitle={t('admin.noStudents')}
         onPress={(p) => router.push(`/(admin)/students/${p.userId}` as never)}
         onEndReached={() => !classId && !busId && byRole.hasNextPage && !byRole.isFetchingNextPage && byRole.fetchNextPage()}
-        refreshing={byRole.isRefetching}
+        refreshing={classId ? byClass.isRefetching : busId ? byBus.isRefetching : byRole.isRefetching}
         onRefresh={() => (classId ? byClass.refetch() : busId ? byBus.refetch() : byRole.refetch())}
       />
     </Screen>

@@ -12,6 +12,7 @@ import { useImportJob, useStartImport, type ImportRow } from '../../../features/
 import { isEmail, isUsername } from '../../../lib/validation';
 import { downloadTextFile } from '../../../lib/util/device';
 import { toCsv as rowsToCsv } from '../../../lib/util/format';
+import { parseJson } from '../../../lib/data/client';
 
 const TEMPLATE_COLUMNS = ['username', 'password', 'parentEmail', 'fullName', 'className', 'busId', 'parentPhone', 'homeAddress', 'grade'];
 const BATCH = 400;
@@ -31,10 +32,11 @@ export default function AdminImportStudents() {
   const job = useImportJob(jobIds[0]);
 
   const classNames = useMemo(() => new Set((classes.data ?? []).map((c) => c.name.trim().toLowerCase())), [classes.data]);
-  const busIds = useMemo(() => new Set((buses.data ?? []).map((b) => b.busId.toLowerCase())), [buses.data]);
+  // lower-case → real bus id: the server looks buses up by their exact id ("bus-01" ≠ "BUS-01").
+  const busIds = useMemo(() => new Map((buses.data ?? []).map((b) => [b.busId.toLowerCase(), b.busId])), [buses.data]);
 
   const downloadTemplate = () => {
-    const sample = [{ username: 'S-10001', password: '', parentEmail: 'parent@example.com', fullName: 'Sara Ahmed', className: classes.data?.[0]?.name ?? '3A', busId: buses.data?.[0]?.busId ?? 'BUS-01', parentPhone: '+966500000000', homeAddress: 'Street 1, District', grade: '3' }];
+    const sample = [{ username: 'S-10001', password: '', parentEmail: 'parent@example.com', fullName: 'Sara Ahmed', className: classes.data?.[0]?.name ?? '3A', busId: buses.data?.[0]?.busId ?? 'BUS-01', parentPhone: '+97455000000', homeAddress: 'Street 1, District', grade: '3' }];
     void downloadTextFile('students-template.csv', rowsToCsv(sample, TEMPLATE_COLUMNS));
   };
 
@@ -58,7 +60,7 @@ export default function AdminImportStudents() {
         parentEmail: (r.parentEmail ?? '').trim(),
         fullName: (r.fullName ?? '').trim(),
         className: (r.className ?? '').trim() || undefined,
-        busId: (r.busId ?? '').trim() || undefined,
+        busId: busIds.get((r.busId ?? '').trim().toLowerCase()) ?? ((r.busId ?? '').trim() || undefined),
         parentPhone: (r.parentPhone ?? '').trim() || undefined,
         homeAddress: (r.homeAddress ?? '').trim() || undefined,
         grade: (r.grade ?? '').trim() || undefined,
@@ -96,7 +98,7 @@ export default function AdminImportStudents() {
   };
 
   const downloadReport = () => {
-    const results = (typeof job.data?.results === 'string' ? (JSON.parse(job.data.results) as Record<string, unknown>[]) : ((job.data?.results as Record<string, unknown>[] | null) ?? [])) ?? [];
+    const results = parseJson<Record<string, unknown>[]>(job.data?.results) ?? [];
     void downloadTextFile(`import-report-${job.data?.id ?? 'job'}.csv`, rowsToCsv(results, ['row', 'username', 'status', 'password', 'error']));
   };
 

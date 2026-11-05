@@ -855,12 +855,14 @@ async function assignTeacher(client: DataClient, caller: Caller, args: { teacher
   if (teacher.role !== 'TEACHER') throw new HandlerError('Not a teacher', 'VALIDATION');
   const wanted = new Set(args.classIds.filter((x): x is string => !!x));
   const current = await listAll((nextToken) => client.models.Class.listClassesByTeacher({ teacherId: teacher.userId }, { limit: 100, nextToken }));
-  for (const c of current) {
-    if (!wanted.has(c.id)) {
+  await mapLimit(
+    current.filter((c) => !wanted.has(c.id)),
+    4,
+    async (c) => {
       await client.models.Class.update({ id: c.id, teacherId: null, teacherName: null });
       await removeMember(client, classConversationId(c.id), teacher.userId);
-    }
-  }
+    },
+  );
   const names: string[] = [];
   for (const classId of wanted) {
     const cls = await getClass(client, classId, caller.schoolId);
@@ -870,7 +872,8 @@ async function assignTeacher(client: DataClient, caller: Caller, args: { teacher
       await removeMember(client, classConversationId(cls.id), cls.teacherId);
       const prev = await client.models.Profile.get({ userId: cls.teacherId });
       if (prev.data) {
-        await client.models.Profile.update({ userId: prev.data.userId, classIds: (prev.data.classIds ?? []).filter((x) => x !== cls.id) });
+        const names = (prev.data.className ?? '').split(', ').filter((n) => n && n !== cls.name);
+        await client.models.Profile.update({ userId: prev.data.userId, classIds: (prev.data.classIds ?? []).filter((x) => x !== cls.id), className: names.join(', ') || null });
       }
     }
     await client.models.Class.update({ id: cls.id, teacherId: teacher.userId, teacherName: teacher.fullName, conversationId: classConversationId(cls.id) });

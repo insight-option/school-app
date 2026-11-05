@@ -125,12 +125,13 @@ export default function AdminBusDetail() {
           <Button
             title={t('admin.save')}
             loading={updateBus.isPending}
-            onPress={() =>
+            onPress={() => {
+              if (form.plate.trim().length < 2 || form.driverName.trim().length < 2) return toast.error(t('common.requiredField'));
               updateBus.mutate(
-                { busId: id, plate: form.plate.trim(), driverName: form.driverName.trim(), driverPhone: form.driverPhone || null, capacity: Math.max(1, Number(form.capacity) || 40) },
-                { onSuccess: () => setEdit(false), onError: (e) => toast.error(e.message) },
-              )
-            }
+                { busId: id, plate: form.plate.trim(), driverName: form.driverName.trim(), driverPhone: form.driverPhone.trim() || null, capacity: Math.min(200, Math.max(1, Number(form.capacity) || 40)) },
+                { onSuccess: () => { setEdit(false); toast.success(t('common.success')); }, onError: (e) => toast.error(e.message) },
+              );
+            }}
           />
         </View>
       </Sheet>

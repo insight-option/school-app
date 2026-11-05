@@ -28,7 +28,10 @@ export default function VerifyScreen() {
     return () => clearInterval(id);
   }, []);
 
+  const steps = draft?.kind === 'customer' ? 2 : 3;
+
   const verify = async (value = code) => {
+    if (busy) return;
     if (value.length !== 6 || !email.trim()) {
       setError(t('common.requiredField'));
       return;
@@ -67,10 +70,10 @@ export default function VerifyScreen() {
   return (
     <Screen scroll keyboard maxWidth={480} contentStyle={{ paddingTop: spacing.md }}>
       <Pressable accessibilityRole="button" accessibilityLabel={t('common.back')} hitSlop={10} onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} style={[styles.back, { backgroundColor: colors.surfaceAlt }]}>
-        <Ionicons name="arrow-back" size={22} color={colors.text} />
+        <Ionicons name="arrow-back" size={22} color={colors.text} style={{ transform: [{ scaleX: theme.arabic ? -1 : 1 }] }} />
       </Pressable>
       <View style={{ gap: spacing.sm, marginTop: spacing.xl, marginBottom: spacing.xxl }}>
-        <StepDots current={2} total={3} label={t('signup.stepOf', { current: 2, total: 3 })} />
+        <StepDots current={2} total={steps} label={t('signup.stepOf', { current: 2, total: steps })} />
         <View style={[styles.icon, { backgroundColor: colors.primarySoft }]}>
           <Ionicons name="mail-unread-outline" size={30} color={colors.primary} />
         </View>
@@ -96,7 +99,7 @@ export default function VerifyScreen() {
             maxLength={6}
             placeholder="••••••"
             placeholderTextColor={colors.textFaint}
-            style={[styles.code, { color: colors.text, borderColor: error ? colors.danger : colors.border, backgroundColor: colors.surface, borderRadius: radius.md }]}
+            style={[styles.code, { color: colors.text, fontFamily: theme.fonts.bold, borderColor: error ? colors.danger : colors.border, backgroundColor: colors.surface, borderRadius: radius.md }]}
             accessibilityLabel={t('signup.code')}
             testID="verify-code"
           />
@@ -116,5 +119,5 @@ export default function VerifyScreen() {
 const styles = StyleSheet.create({
   back: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   icon: { width: 60, height: 60, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
-  code: { borderWidth: 1, height: 64, fontSize: 30, letterSpacing: 14, textAlign: 'center', fontWeight: '700' },
+  code: { borderWidth: 1, height: 64, fontSize: 30, letterSpacing: 14, textAlign: 'center' },
 });

@@ -44,7 +44,7 @@ export default function VenueEditor() {
 
   const submit = () => {
     if (!draft) return;
-    const e = validateVenue(draft, t);
+    const e = validateVenue(draft, t, business.data);
     setErrors(e);
     if (Object.keys(e).length) {
       toast.warning(Object.values(e)[0]!);
@@ -77,7 +77,7 @@ export default function VenueEditor() {
   if (!isNew && !venue.isLoading && !venue.data) {
     return (
       <Screen back title={title}>
-        <EmptyState icon="alert-circle-outline" title={t('platform.venue.notFound')} actionLabel={t('common.back')} onAction={() => router.back()} />
+        <EmptyState icon="alert-circle-outline" title={t('platform.venue.notFound')} actionLabel={t('common.back')} onAction={() => (router.canGoBack() ? router.back() : router.replace('/(partner)/venues' as never))} />
       </Screen>
     );
   }
@@ -115,7 +115,8 @@ export default function VenueEditor() {
             onSuccess: () => {
               setConfirmDelete(false);
               toast.success(t('partner.venueForm.deleted'));
-              router.back();
+              if (router.canGoBack()) router.back();
+              else router.replace('/(partner)/venues' as never);
             },
             onError: (e) => {
               setConfirmDelete(false);

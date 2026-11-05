@@ -216,7 +216,7 @@ export async function registerSchool(deps: Deps, identity: Caller, raw: unknown)
         logoKey: input.logoKey || undefined,
         address: input.address ?? undefined,
         schoolLocation: location,
-        timezone: input.timezone || 'Asia/Riyadh',
+        timezone: input.timezone || 'Asia/Qatar',
         defaultLanguage: input.language ?? 'en',
         morningTripStart: '06:30',
         afternoonTripStart: '13:30',
@@ -250,8 +250,13 @@ export async function registerSchool(deps: Deps, identity: Caller, raw: unknown)
     for (const undo of steps.reverse()) await undo().catch((err) => console.error('rollback step failed', err));
     throw e;
   }
-  await startTrialSubscription(client, { tenantId: schoolId, tenantType: 'SCHOOL', tenantName: input.name, billingName: input.adminName, billingEmail: email, billingPhone: input.phone ?? undefined });
-  await recordEvent(client, { type: 'SCHOOL_REGISTERED', title: input.name, detail: `${input.adminName} · ${email}`, tenantId: schoolId, tenantType: 'SCHOOL', actorId: identity.sub });
+  // Billing and the owner's activity feed must never undo a school that was created successfully.
+  await Promise.all([
+    startTrialSubscription(client, { tenantId: schoolId, tenantType: 'SCHOOL', tenantName: input.name, billingName: input.adminName, billingEmail: email, billingPhone: input.phone ?? undefined }).catch((e) =>
+      console.error('trial subscription failed', e),
+    ),
+    recordEvent(client, { type: 'SCHOOL_REGISTERED', title: input.name, detail: `${input.adminName} · ${email}`, tenantId: schoolId, tenantType: 'SCHOOL', actorId: identity.sub }).catch((e) => console.error('platform event failed', e)),
+  ]);
   await audit(client, {
     schoolId,
     actorId: identity.sub,
@@ -321,8 +326,9 @@ export async function saveSchoolProfile(deps: Deps, caller: SchoolCaller, raw: u
   const { client } = deps;
   const p = parseSchoolProfile(raw);
   const cols = schoolColumns(p);
-  const existing = (await client.models.School.get({ schoolId: caller.schoolId })).data;
-  const settings = (await client.models.SchoolSettings.get({ schoolId: caller.schoolId })).data;
+  const [existingRes, settingsRes] = await Promise.all([client.models.School.get({ schoolId: caller.schoolId }), client.models.SchoolSettings.get({ schoolId: caller.schoolId })]);
+  const existing = existingRes.data;
+  const settings = settingsRes.data;
   let saved: School | null;
   if (existing) {
     saved = unwrap(await client.models.School.update({ ...(cols as Record<string, unknown>), schoolId: caller.schoolId } as Parameters<typeof client.models.School.update>[0]), 'School.update');

@@ -16,16 +16,35 @@ type IconName = keyof typeof Ionicons.glyphMap;
 /** Doha – the map centre when nothing better is known. */
 export const DOHA: LatLng = { lat: 25.2854, lng: 51.531 };
 
-/** Upload picked images to the caller's public media folder (`school-media/<identity id>/…`). */
+/**
+ * Upload picked images to the caller's public media folder (`school-media/<identity id>/…`), three
+ * at a time. Returns the keys that uploaded (in pick order) and how many failed.
+ */
 export async function uploadPublicImages(picked: PickedAttachment[], onEach?: (done: number) => void): Promise<string[]> {
-  const base = `school-media/${await myIdentityId()}`;
-  const keys: string[] = [];
-  for (const att of picked) {
-    const { key } = await uploadAttachment(att, base);
-    keys.push(key);
-    onEach?.(keys.length);
-  }
+  const { keys, failed } = await uploadPublicImagesSettled(picked, onEach);
+  if (failed && !keys.length) throw new Error('Upload failed – check your connection and try again.');
   return keys;
+}
+
+export async function uploadPublicImagesSettled(picked: PickedAttachment[], onEach?: (done: number) => void): Promise<{ keys: string[]; failed: number }> {
+  const base = `school-media/${await myIdentityId()}`;
+  const out: (string | null)[] = new Array(picked.length).fill(null);
+  let done = 0;
+  let next = 0;
+  const worker = async () => {
+    while (next < picked.length) {
+      const i = next++;
+      try {
+        out[i] = (await uploadAttachment(picked[i], base)).key;
+      } catch (e) {
+        console.warn('image upload failed', e);
+      }
+      onEach?.(++done);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(3, picked.length) }, worker));
+  const keys = out.filter((k): k is string => !!k);
+  return { keys, failed: picked.length - keys.length };
 }
 
 /** Card with a section title (and optional subtitle / right action). */

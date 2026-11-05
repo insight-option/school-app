@@ -178,17 +178,20 @@ export function useSendMessage() {
 export function useMarkConversationRead() {
   const qc = useQueryClient();
   return useMutation({
+    // Entering and leaving both clear the unread count: everything that arrived while the chat was
+    // open has been seen (otherwise those messages showed up as unread after going back).
     mutationFn: async (input: { conversationId: string; seatUserId: string; viewing: boolean }) => {
       const res = await client.models.ConversationMember.update({
         conversationId: input.conversationId,
         userId: input.seatUserId,
         isViewing: input.viewing,
-        ...(input.viewing ? { unreadCount: 0, lastReadAt: new Date().toISOString() } : {}),
+        unreadCount: 0,
+        lastReadAt: new Date().toISOString(),
       });
       return unwrap(res, 'read');
     },
     onMutate: (input) => {
-      qc.setQueryData<ConversationMember[]>(qk.inbox(input.seatUserId), (old) => old?.map((m) => (m.conversationId === input.conversationId ? { ...m, unreadCount: input.viewing ? 0 : m.unreadCount, isViewing: input.viewing } : m)));
+      qc.setQueryData<ConversationMember[]>(qk.inbox(input.seatUserId), (old) => old?.map((m) => (m.conversationId === input.conversationId ? { ...m, unreadCount: 0, isViewing: input.viewing } : m)));
     },
   });
 }

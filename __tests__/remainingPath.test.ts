@@ -15,6 +15,21 @@ test('remainingPath starts at the bus and continues from the nearest vertex', ()
   expect(r[r.length - 1]).toEqual(line[3]);
 });
 
+test('remainingPath follows the first nearby stretch when the route comes back past the bus', () => {
+  // out to a pickup in the north and back south past the bus towards school
+  const loop = [
+    { lat: 0, lng: 0 },
+    { lat: 0.02, lng: 0 },
+    { lat: 0.02, lng: 0.0003 },
+    { lat: -0.02, lng: 0.0003 },
+  ];
+  const bus = { lat: 0.001, lng: 0.00015 }; // 16 m from both legs
+  const r = remainingPath(bus, loop);
+  expect(r[0]).toEqual(bus);
+  expect(r[1]).toEqual(loop[1]); // still heading to the pickup
+  expect(r).toHaveLength(4);
+});
+
 test('remainingPath keeps the whole line when the bus is far off route', () => {
   expect(remainingPath({ lat: 1, lng: 1 }, line)).toBe(line);
 });

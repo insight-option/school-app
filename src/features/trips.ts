@@ -23,17 +23,19 @@ export type RouteMeta = {
 
 export const routeMetaOf = (trip: Trip | null | undefined): RouteMeta => parseJson<RouteMeta>(trip?.routeMeta) ?? {};
 
-export function useTripsForBusOnDate(busId: string | null | undefined, date: string) {
+export function useTripsForBusOnDate(busId: string | null | undefined, date: string, opts?: { poll?: number | false }) {
   return useQuery({
     queryKey: qk.tripsByBusDate(busId ?? '', date),
     enabled: !!busId,
     staleTime: 10_000,
+    // Safety net under the live subscription (a socket can drop while the phone sleeps).
+    refetchInterval: opts?.poll ?? false,
     queryFn: async () => listAll((nextToken) => client.models.Trip.listTripsByBusAndDate({ busId: busId!, date: { eq: date } }, { limit: 20, nextToken })),
   });
 }
 
-export function useActiveTrip(busId: string | null | undefined, date: string) {
-  const q = useTripsForBusOnDate(busId, date);
+export function useActiveTrip(busId: string | null | undefined, date: string, opts?: { poll?: number | false }) {
+  const q = useTripsForBusOnDate(busId, date, opts);
   const active = q.data?.find((t) => t.status === 'ACTIVE') ?? null;
   const latest = q.data?.slice().sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''))[0] ?? null;
   return { ...q, active, latest };
@@ -91,11 +93,12 @@ export function useStudentStops(studentId: string | null | undefined, days = 30)
   });
 }
 
-export function useBusLocation(busId: string | null | undefined) {
+export function useBusLocation(busId: string | null | undefined, opts?: { poll?: number | false }) {
   return useQuery({
     queryKey: qk.busLocation(busId ?? ''),
     enabled: !!busId,
     staleTime: 4_000,
+    refetchInterval: opts?.poll ?? false,
     queryFn: async () => unwrap(await client.models.BusLocation.get({ busId: busId! }), 'bus location'),
   });
 }
@@ -111,6 +114,55 @@ export function useBusLocationSubscription(busId: string | null | undefined, ena
     });
     return () => sub.unsubscribe();
   }, [busId, enabled, qc]);
+}
+
+/**
+ * Rider side: know the moment the driver starts (or ends) a trip, without waiting for a refresh.
+ * New trips arrive through onCreate; status / route changes through onUpdate.
+ */
+export function useBusTripsSubscription(busId: string | null | undefined, date: string, enabled = true) {
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (!busId || !enabled) return;
+    const upsert = (trip: Trip) => {
+      if (trip.busId !== busId) return;
+      qc.setQueryData<Trip[]>(qk.tripsByBusDate(busId, trip.date), (old) => {
+        const list = old ?? [];
+        return list.some((t) => t.id === trip.id) ? list.map((t) => (t.id === trip.id ? { ...t, ...trip } : t)) : [...list, trip];
+      });
+      qc.setQueryData<Trip | null>(qk.trip(trip.id), (old) => ({ ...(old ?? {}), ...trip }) as Trip);
+      // Stops are written right after the trip; re-read them whenever the trip (count, route) changes.
+      void qc.invalidateQueries({ queryKey: qk.stops(trip.id) });
+    };
+    const s1 = client.models.Trip.onCreate({ filter: { busId: { eq: busId } } }).subscribe({ next: upsert, error: (e) => console.warn('trip create sub', e) });
+    const s2 = client.models.Trip.onUpdate({ filter: { busId: { eq: busId } } }).subscribe({ next: upsert, error: (e) => console.warn('trip update sub', e) });
+    return () => {
+      s1.unsubscribe();
+      s2.unsubscribe();
+    };
+  }, [busId, date, enabled, qc]);
+}
+
+/** Rider side: the student's own stop (alarm, boarded, ETA, moved pickup) the instant it changes. */
+export function useMyStopSubscription(studentId: string | null | undefined, enabled = true) {
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (!studentId || !enabled) return;
+    const upsert = (stop: TripStop) => {
+      if (stop.studentId !== studentId) return;
+      qc.setQueryData<TripStop[]>(qk.stops(stop.tripId), (old) => {
+        if (!old) return old;
+        const next = old.some((s) => s.id === stop.id) ? old.map((s) => (s.id === stop.id ? { ...s, ...stop } : s)) : [...old, stop];
+        return next.sort((a, b) => a.order - b.order);
+      });
+    };
+    const s1 = client.models.TripStop.onCreate({ filter: { studentId: { eq: studentId } } }).subscribe({ next: upsert, error: (e) => console.warn('my stop create sub', e) });
+    const s2 = client.models.TripStop.onUpdate({ filter: { studentId: { eq: studentId } } }).subscribe({ next: upsert, error: (e) => console.warn('my stop update sub', e) });
+    return () => {
+      s1.unsubscribe();
+      s2.unsubscribe();
+    };
+  }, [studentId, enabled, qc]);
 }
 
 /** Live trip + stops updates for a trip (driver map, parent Bus tab). */

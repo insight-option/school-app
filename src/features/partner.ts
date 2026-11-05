@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client, listAll, unwrap, type Booking, type Business, type Invoice, type Plan, type TenantSubscription, type Venue } from '../lib/data/client';
 import { useSession } from '../lib/auth/session';
-import { addDays, qatarNow, toMinutes } from '../../amplify/functions/shared/booking';
+import { addDays, bookingEndMinute, minutesSince, qatarNow, toMinutes } from '../../amplify/functions/shared/booking';
 
 /**
  * Partner (activity business) workspace data. The partner's business id is their tenant id
@@ -340,18 +340,15 @@ export function usePlans() {
 export const isActiveBooking = (b: Pick<Booking, 'status'>) => b.status === 'PENDING' || b.status === 'CONFIRMED';
 
 /** Minutes since midnight of a booking's end (overnight bookings end on the next day). */
-export function endMinutes(b: Pick<Booking, 'startTime' | 'endTime'>): number {
-  const s = toMinutes(b.startTime);
-  const e = toMinutes(b.endTime);
-  return e <= s ? e + 1440 : e;
-}
+export const endMinutes = (b: Pick<Booking, 'startTime' | 'endTime'>): number => bookingEndMinute(b.startTime, b.endTime);
 
 export function hasStarted(b: Pick<Booking, 'date' | 'startTime'>, now: { date: string; minutes: number }): boolean {
-  return b.date < now.date || (b.date === now.date && toMinutes(b.startTime) <= now.minutes);
+  return minutesSince(b.date, toMinutes(b.startTime), now) >= 0;
 }
 
+/** Overnight-aware: a 23:00–01:00 booking is still running at 00:30 the next day. */
 export function hasEnded(b: Pick<Booking, 'date' | 'startTime' | 'endTime'>, now: { date: string; minutes: number }): boolean {
-  return b.date < now.date || (b.date === now.date && endMinutes(b) <= now.minutes);
+  return minutesSince(b.date, endMinutes(b), now) >= 0;
 }
 
 export type DashboardStats = {
@@ -362,7 +359,7 @@ export type DashboardStats = {
   currency: string;
 };
 
-export function dashboardStats(bookings: Booking[], now: { date: string }): DashboardStats {
+export function dashboardStats(bookings: Booking[], now: { date: string; minutes: number }): DashboardStats {
   const weekEnd = addDays(now.date, 6);
   const month = now.date.slice(0, 7);
   let today = 0;
@@ -371,7 +368,7 @@ export function dashboardStats(bookings: Booking[], now: { date: string }): Dash
   let revenueMonth = 0;
   let currency = 'QAR';
   for (const b of bookings) {
-    if (b.status === 'PENDING' && b.date >= now.date) pending++;
+    if (b.status === 'PENDING' && !hasEnded(b, now)) pending++;
     if (isActiveBooking(b) || b.status === 'COMPLETED') {
       if (b.date === now.date) today++;
       if (b.date >= now.date && b.date <= weekEnd) week++;

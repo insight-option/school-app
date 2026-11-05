@@ -10,7 +10,7 @@ export const MESSAGES_CHANNEL_ID = 'messages';
 export const DEFAULT_CHANNEL_ID = 'default';
 
 export type PushData = {
-  type?: 'ALARM' | 'TEST_ALARM' | 'MESSAGE' | 'FEEDBACK' | 'BROADCAST' | 'BUS_NEAR' | 'BOARDED' | 'DROPPED' | 'SYSTEM' | 'APPLICATION' | 'BOOKING';
+  type?: 'ALARM' | 'TEST_ALARM' | 'MESSAGE' | 'FEEDBACK' | 'BROADCAST' | 'BUS_NEAR' | 'BOARDED' | 'DROPPED' | 'SYSTEM' | 'APPLICATION' | 'BOOKING' | 'TRIP';
   applicationId?: string;
   bookingId?: string;
   studentName?: string;
@@ -168,7 +168,8 @@ export function routeForPush(data: PushData | undefined, role: string | null): s
     case 'BUS_NEAR':
     case 'BOARDED':
     case 'DROPPED':
-      return role === 'STUDENT' ? '/(student)/bus' : '/notifications';
+    case 'TRIP':
+      return role === 'STUDENT' ? '/(student)/bus' : role === 'DRIVER' ? '/(driver)/trip' : '/notifications';
     case 'BOOKING':
       if (!data.bookingId) return role === 'OWNER' ? '/(owner)/bookings' : '/notifications';
       return role === 'PARTNER' ? `/(partner)/bookings/${data.bookingId}` : role === 'CUSTOMER' ? `/(customer)/booking/${data.bookingId}` : role === 'OWNER' ? '/(owner)/bookings' : '/notifications';

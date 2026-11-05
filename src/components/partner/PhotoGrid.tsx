@@ -6,7 +6,7 @@ import { Text, useTheme } from '../../ui';
 import { toast } from '../../ui/Toast';
 import { StorageImage } from '../media/StorageImage';
 import { pickFromLibrary } from '../chat/attachments';
-import { uploadPublicImages } from './fields';
+import { uploadPublicImagesSettled } from './fields';
 
 export const MAX_PHOTOS = 12;
 
@@ -23,15 +23,14 @@ export function PhotoGrid({ value, onChange }: { value: string[]; onChange: (v: 
     const room = MAX_PHOTOS - value.length;
     const batch = picked.slice(0, room);
     setProgress({ done: 0, total: batch.length });
-    const uploaded: string[] = [];
     try {
-      const keys = await uploadPublicImages(batch, (done) => setProgress({ done, total: batch.length }));
-      uploaded.push(...keys);
+      const { keys, failed } = await uploadPublicImagesSettled(batch, (done) => setProgress({ done, total: batch.length }));
+      if (keys.length) onChange([...value, ...keys].slice(0, MAX_PHOTOS));
+      if (failed) toast.error(t('partner.venueForm.uploadFailed', { count: failed }));
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
       setProgress(null);
-      if (uploaded.length) onChange([...value, ...uploaded].slice(0, MAX_PHOTOS));
     }
   };
 

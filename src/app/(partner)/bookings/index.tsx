@@ -27,7 +27,7 @@ export default function PartnerBookings() {
   const [answering, setAnswering] = useState<string | null>(null);
 
   const all = useMemo(() => q.data ?? [], [q.data]);
-  const pendingCount = useMemo(() => all.filter((b) => b.status === 'PENDING' && b.date >= now.date).length, [all, now.date]);
+  const pendingCount = useMemo(() => all.filter((b) => b.status === 'PENDING' && !hasEnded(b, now)).length, [all, now]);
   // Open on Requests when something is waiting, otherwise on the upcoming schedule.
   const active: Mode = mode ?? (pendingCount ? 'requests' : 'upcoming');
   const selectedDay = day ?? now.date;
@@ -40,14 +40,14 @@ export default function PartnerBookings() {
   const items = useMemo((): Booking[] => {
     switch (active) {
       case 'requests':
-        return all.filter((b) => b.status === 'PENDING' && b.date >= now.date);
+        return all.filter((b) => b.status === 'PENDING' && !hasEnded(b, now));
       case 'upcoming':
         return all.filter((b) => b.status === 'CONFIRMED' && !hasEnded(b, now));
       case 'day':
         return all.filter((b) => b.date === selectedDay);
       case 'past':
       default:
-        return all.filter((b) => b.date < now.date || hasEnded(b, now) || (b.status !== 'PENDING' && b.status !== 'CONFIRMED')).reverse();
+        return all.filter((b) => hasEnded(b, now) || (b.status !== 'PENDING' && b.status !== 'CONFIRMED')).reverse();
     }
   }, [active, all, now, selectedDay]);
 

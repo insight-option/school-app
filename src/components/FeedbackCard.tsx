@@ -42,8 +42,8 @@ export function FeedbackCard({ item, showStudent, actions }: { item: Feedback; s
           ))}
         </View>
       ) : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text variant="caption" color="textMuted">
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <Text variant="caption" color="textMuted" style={{ flex: 1 }}>
           {t('feedback.from', { name: item.authorName })} · {t(`roles.${item.authorRole}`)}
         </Text>
         {actions}

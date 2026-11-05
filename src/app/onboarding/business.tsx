@@ -10,7 +10,7 @@ import { ChipSelect, FieldLabel, ImageField, LocationField } from '../../compone
 import { activeCategories, categoryName, useCategories } from '../../features/platform';
 import type { BusinessPayload } from '../../features/partner';
 import { client, humanizeError, unwrap } from '../../lib/data/client';
-import { refreshSession, signOutEverywhere, useSession } from '../../lib/auth/session';
+import { refreshSession, signOutEverywhere, useSession, useSessionStore } from '../../lib/auth/session';
 import { currentLanguage } from '../../lib/i18n';
 import { haptic } from '../../lib/util/device';
 import type { LatLng } from '../../lib/geo';
@@ -108,6 +108,7 @@ export default function BusinessSetupScreen() {
       };
       unwrap(await client.mutations.registerBusiness({ business: JSON.stringify(business) }), 'business');
       const s = await refreshSession();
+      useSessionStore.getState().setSignup(null);
       haptic('success');
       toast.success(t('partner.onboarding.created'));
       if (s.role === 'PARTNER') router.replace('/(partner)/dashboard' as never);

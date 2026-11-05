@@ -1,7 +1,7 @@
 import type { Schema } from '../../data/resource';
 import type { DataClient } from './data';
 import { listAll, mapLimit, nowIso } from './data';
-import { pushToUsers, type PushPayload } from './push';
+import { isExpoPushToken, pushToUsers, sendExpoPush, type ExpoPushMessage, type PushPayload } from './push';
 import { isOfficeSeat } from './tenancy';
 
 export type NotificationType = Schema['Notification']['type']['type'];
@@ -47,6 +47,47 @@ export async function notifyUsers(
     pushed = await pushToUsers(client, userIds, payload);
   }
   return { inbox, pushed };
+}
+
+export type PersonalNotice = { userId: string; title: string; body?: string; data?: Record<string, unknown> };
+
+/**
+ * One personalised notice per user (own language, own ETA …): inbox rows plus a single batched Expo
+ * push for every device, so a trip start reaches a full bus within one request to Expo.
+ */
+export async function notifyEach(client: DataClient, opts: { schoolId: string; type: NotificationType; notices: PersonalNotice[]; channelId?: string }): Promise<{ inbox: number; pushed: number }> {
+  const notices = opts.notices.filter((n) => n.userId && !isOfficeSeat(n.userId));
+  if (!notices.length) return { inbox: 0, pushed: 0 };
+  const devices = await mapLimit(notices, 8, (n) => listAll((nextToken) => client.models.Device.listDevicesByUser({ userId: n.userId }, { limit: 50, nextToken })));
+  const messages: ExpoPushMessage[] = [];
+  notices.forEach((n, i) => {
+    for (const d of devices[i] ?? []) {
+      if (!isExpoPushToken(d.expoPushToken)) continue;
+      messages.push({ to: d.expoPushToken, title: n.title, body: n.body, data: { type: opts.type, ...(n.data ?? {}) }, sound: 'default', priority: 'high', ...(opts.channelId ? { channelId: opts.channelId } : {}) });
+    }
+  });
+  // Push first – it is what the rider is waiting for; the inbox rows follow.
+  const [{ sent, invalidTokens }, inbox] = await Promise.all([
+    messages.length ? sendExpoPush(messages) : Promise.resolve({ sent: 0, invalidTokens: [] as string[] }),
+    mapLimit(notices, 10, async (n) => {
+      const res = await client.models.Notification.create({
+        userId: n.userId,
+        schoolId: opts.schoolId,
+        type: opts.type,
+        title: n.title,
+        body: n.body,
+        data: n.data ? JSON.stringify(n.data) : undefined,
+        read: false,
+        sentAt: nowIso(),
+      });
+      return res.errors?.length ? 0 : 1;
+    }),
+  ]);
+  if (invalidTokens.length) {
+    const dead = devices.flat().filter((d) => invalidTokens.includes(d.expoPushToken));
+    await mapLimit(dead, 5, (d) => client.models.Device.delete({ id: d.id }));
+  }
+  return { inbox: inbox.reduce<number>((a, b) => a + b, 0), pushed: sent };
 }
 
 /** All active office admins of one school. */

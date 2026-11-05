@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client, listAll, unwrap, type DayStatus, type StudentDayStatus } from '../lib/data/client';
 import { qk } from '../lib/query/client';
-import { expandAbsenceRange } from '../lib/rules/dayStatus';
 import { useSession } from '../lib/auth/session';
 
 export { LOCKED_STOP_STATUSES, canChangeDayStatus, expandAbsenceRange } from '../lib/rules/dayStatus';
@@ -61,41 +60,32 @@ export function useAbsencesOnDate(date: string, enabled = true) {
   });
 }
 
+/**
+ * "Not going today" (optionally until a later day) / "I'm going again". Written by the server, which
+ * also takes the stop off – or back onto – a running trip, re-routes the bus and tells the driver.
+ */
 export function useSetDayStatus() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: {
-      studentId: string;
-      studentName: string;
-      busId: string;
-      schoolId: string;
-      date: string;
-      status: DayStatus;
-      note?: string | null;
-      untilDate?: string | null;
-      setBy: string;
-      activeTripId?: string | null;
-    }) => {
-      const days = input.status === 'NOT_GOING' ? expandAbsenceRange(input.date, input.untilDate) : [input.date];
-      const results: StudentDayStatus[] = [];
-      for (const date of days) {
-        const existing = await client.models.StudentDayStatus.get({ studentId: input.studentId, date });
-        // Cleared fields are sent as '' – AppSync rejects null from an owner without delete
-        // permission ("Unauthorized on [note, untilDate]"), which broke "I'm going again".
-        const base = { studentId: input.studentId, date, ownerId: input.studentId, busId: input.busId, schoolId: input.schoolId, studentName: input.studentName, status: input.status, note: input.note || '', setBy: input.setBy, untilDate: input.untilDate || '' };
-        const res = existing.data ? await client.models.StudentDayStatus.update(base) : await client.models.StudentDayStatus.create(base);
-        const row = unwrap(res, 'day status');
-        if (row) results.push(row);
-      }
-      if (input.activeTripId) {
-        // Route is recomputed server-side (rate-limited); fire and forget.
-        client.mutations.computeTripRoute({ tripId: input.activeTripId }).catch(() => undefined);
-      }
-      return results;
+    mutationFn: async (input: { studentId: string; busId: string; date: string; status: DayStatus; note?: string | null; untilDate?: string | null }) => {
+      const res = await client.mutations.setDayStatus({ date: input.date, status: input.status, note: input.note || undefined, untilDate: input.status === 'NOT_GOING' ? (input.untilDate ?? undefined) : undefined });
+      return (unwrap(res, 'day status') ?? []).filter((r): r is StudentDayStatus => !!r);
+    },
+    onMutate: async (input) => {
+      // Flip the button instantly; the server confirms (or the error rolls it back).
+      const key = qk.dayStatus(input.studentId, input.date);
+      await qc.cancelQueries({ queryKey: key });
+      const prev = qc.getQueryData<StudentDayStatus | null>(key);
+      qc.setQueryData(key, { ...(prev ?? {}), studentId: input.studentId, date: input.date, status: input.status, note: input.note ?? null, untilDate: input.untilDate ?? null } as StudentDayStatus);
+      return { prev, key };
+    },
+    onError: (_e, _input, ctx) => {
+      if (ctx) qc.setQueryData(ctx.key, ctx.prev ?? null);
     },
     onSuccess: (rows, input) => {
       for (const r of rows) qc.setQueryData(qk.dayStatus(r.studentId, r.date), r);
       void qc.invalidateQueries({ queryKey: qk.dayStatusByBus(input.busId, input.date) });
+      void qc.invalidateQueries({ queryKey: ['stops'] });
     },
   });
 }

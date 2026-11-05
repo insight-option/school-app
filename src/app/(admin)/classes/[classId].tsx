@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
-import { Avatar, Badge, Button, Card, ConfirmSheet, Input, KeyValue, ListItem, Screen, SectionHeader, Select, Sheet, SkeletonCard, Text, useTheme } from '../../../ui';
+import { Avatar, Badge, Button, Card, ConfirmSheet, EmptyState, Input, KeyValue, ListItem, Screen, SectionHeader, Select, Sheet, SkeletonCard, Text, useTheme } from '../../../ui';
 import { toast } from '../../../ui/Toast';
 import { StudentPicker } from '../../../components/admin/StudentPicker';
 import { flattenPages, useProfilesByClass, useProfilesByRole } from '../../../features/profiles';
@@ -77,7 +77,7 @@ export default function AdminClassDetail() {
     <Screen back title={cls?.name ?? t('admin.classes')} scroll maxWidth={880} right={cls ? <Button size="sm" variant="secondary" icon="people-outline" title={t('teacher.classGroup')} onPress={() => router.push(`/chat/class_${id}` as never)} /> : undefined}>
       {!cls ? (
         <View style={{ marginTop: theme.spacing.lg }}>
-          <SkeletonCard />
+          {classes.isLoading ? <SkeletonCard /> : <EmptyState icon="library-outline" title={t('office.classNotFound')} actionLabel={t('admin.classes')} onAction={() => router.replace('/(admin)/classes')} />}
         </View>
       ) : (
         <View style={{ gap: theme.spacing.lg, paddingTop: theme.spacing.md }}>

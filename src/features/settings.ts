@@ -11,7 +11,7 @@ export const DEFAULT_SETTINGS: Omit<SchoolSettings, 'createdAt' | 'updatedAt'> =
   primaryColor: null,
   address: null,
   schoolLocation: null,
-  timezone: 'Asia/Riyadh',
+  timezone: 'Asia/Qatar',
   defaultLanguage: 'en',
   morningTripStart: '06:30',
   afternoonTripStart: '13:30',

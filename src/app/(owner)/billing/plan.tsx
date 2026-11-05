@@ -89,7 +89,8 @@ function PlanForm({ initial, nextOrder }: { initial: Plan | null; nextOrder: num
       {
         onSuccess: () => {
           toast.success(t('owner.plan.saved'));
-          router.back();
+          if (router.canGoBack()) router.back();
+          else router.replace('/(owner)/billing' as never);
         },
         onError: (err) => toast.error(err.message),
       },
@@ -151,7 +152,8 @@ function PlanForm({ initial, nextOrder }: { initial: Plan | null; nextOrder: num
               onSuccess: () => {
                 toast.success(t('owner.plan.deleted'));
                 setConfirmDelete(false);
-                router.back();
+                if (router.canGoBack()) router.back();
+                else router.replace('/(owner)/billing' as never);
               },
               onError: (e) => toast.error(e.message),
             })

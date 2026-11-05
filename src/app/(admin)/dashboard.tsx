@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, useWindowDimensions } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useQueries } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
@@ -47,12 +47,21 @@ export default function AdminDashboard() {
   const locations = useQueries({
     queries: busIds.map((busId) => ({ queryKey: qk.busLocation(busId), queryFn: async () => unwrap(await client.models.BusLocation.get({ busId }), 'loc'), staleTime: 4000 })),
   });
+  // Tabs stay mounted: only keep the live sockets open while the dashboard is on screen.
+  const [focused, setFocused] = useState(true);
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
   useEffect(() => {
+    if (!focused) return;
     const subs = busIds.map((busId) =>
       client.models.BusLocation.onUpdate({ filter: { busId: { eq: busId } } }).subscribe({ next: (loc) => queryClient.setQueryData(qk.busLocation(busId), loc), error: () => undefined }),
     );
     return () => subs.forEach((s) => s.unsubscribe());
-  }, [busIds]);
+  }, [busIds, focused]);
 
   const activeTrips = (trips.data ?? []).filter((tr) => tr.status === 'ACTIVE');
   const markers: MapMarker[] = [];
@@ -65,14 +74,21 @@ export default function AdminDashboard() {
   });
   if (settings.data?.schoolLocation) markers.push({ id: 'school', kind: 'school', lat: settings.data.schoolLocation.lat, lng: settings.data.schoolLocation.lng, color: theme.colors.markerSchool });
 
-  const studentCount = (classes.data ?? []).reduce((a, c) => a + (c.studentCount ?? 0), 0) || students.data?.pages.flatMap((p) => p.items).length;
+  // Class counters miss students without a class; the loaded list is capped at its first page.
+  const loadedStudents = students.data?.pages.flatMap((p) => p.items).length;
+  const classStudents = (classes.data ?? []).reduce((a, c) => a + (c.studentCount ?? 0), 0);
+  const studentCount = loadedStudents === undefined && !classes.data ? undefined : Math.max(loadedStudents ?? 0, classStudents);
+  const refreshing = trips.isRefetching || buses.isRefetching || applications.isRefetching;
+  const refreshAll = () => {
+    for (const q of [trips, absences, buses, classes, students, teachers, feedback, inbox, applications, listing]) void q.refetch();
+  };
   const teacherCount = teachers.data?.pages.flatMap((p) => p.items).length;
   const unreadOffice = (inbox.data ?? []).reduce((a, m) => a + (m.unreadCount ?? 0), 0);
   const latestFeedback = feedback.data?.pages[0]?.items.slice(0, 3) ?? [];
   const twoCol = width >= 900;
 
   return (
-    <Screen title={t('admin.dashboard')} subtitle={settings.data?.name} scroll maxWidth={1200} refreshing={trips.isRefetching} onRefresh={() => trips.refetch()}>
+    <Screen title={t('admin.dashboard')} subtitle={settings.data?.name} scroll maxWidth={1200} refreshing={refreshing} onRefresh={refreshAll}>
       {profileIncomplete || (!listing.isLoading && !listing.data && !!settings.data) ? (
         <Card tone="primary" onPress={() => router.push('/(admin)/school-profile' as never)} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: theme.spacing.md }}>
           <Ionicons name="storefront" size={26} color={theme.colors.primary} />

@@ -5,7 +5,8 @@ import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { Badge, Button, Card, EmptyState, Input, Screen, Sheet, Skeleton, Text, useTheme } from '../../../ui';
 import { toast } from '../../../ui/Toast';
-import { BOOKING_TONE, formatMoney, isUpcoming, useBooking, useBusiness, useCancelBooking, useVenue } from '../../../features/platform';
+import { BOOKING_TONE, customerCancelState, formatMoney, isUpcoming, qatarNow, useBooking, useBusiness, useCancelBooking, useVenue } from '../../../features/platform';
+import { useMinuteClock } from '../../../components/explore/VenueCard';
 import { weekdayOf } from '../../../../amplify/functions/shared/booking';
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -20,6 +21,7 @@ export default function CustomerBookingScreen() {
   const venue = useVenue(booking.data?.venueId);
   const business = useBusiness(booking.data?.businessId);
   const cancel = useCancelBooking();
+  const nowMs = useMinuteClock();
   const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState('');
   const b = booking.data;
@@ -32,7 +34,12 @@ export default function CustomerBookingScreen() {
     );
   }
   const tone = BOOKING_TONE[b.status ?? 'PENDING'] ?? 'neutral';
-  const upcoming = isUpcoming(b);
+  const upcoming = isUpcoming(b, qatarNow(nowMs));
+  const cancelState = customerCancelState(b, venue.data?.cancellationHours, nowMs);
+  const started = cancelState.started;
+  const deadlineLabel = cancelState.canCancel && cancelState.deadlineMs
+    ? new Intl.DateTimeFormat(i18n.language === 'ar' ? 'ar-QA' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Qatar' }).format(new Date(cancelState.deadlineMs))
+    : null;
   const phone = venue.data?.phone || business.data?.phone;
   const loc = venue.data?.location;
   const dateLabel = new Date(`${b.date}T12:00:00Z`).toLocaleDateString(i18n.language === 'ar' ? 'ar-QA' : 'en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
@@ -55,7 +62,10 @@ export default function CustomerBookingScreen() {
               color={tone === 'success' ? colors.success : tone === 'warning' ? colors.warning : tone === 'danger' ? colors.danger : colors.textMuted}
             />
           </View>
-          <Badge label={t(`platform.bookingStatus.${b.status}`)} tone={tone} />
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            <Badge label={t(`platform.bookingStatus.${b.status}`)} tone={tone} />
+            {started && upcoming ? <Badge label={t('platform.bookings.inProgress')} tone="success" icon="play" /> : null}
+          </View>
           <Text variant="caption" color="textMuted" style={{ letterSpacing: 1 }}>
             {t('platform.book.reference', { ref: b.reference })}
           </Text>
@@ -107,7 +117,23 @@ export default function CustomerBookingScreen() {
           {phone ? <Button title={t('platform.venue.call')} icon="call" variant="secondary" style={{ flex: 1 }} onPress={() => void Linking.openURL(`tel:${phone}`)} /> : null}
         </View>
         {upcoming ? (
-          <Button title={t('platform.bookings.cancel')} icon="close-circle-outline" variant="outline" fullWidth onPress={() => setConfirming(true)} />
+          cancelState.canCancel ? (
+            <View style={{ gap: 8 }}>
+              {deadlineLabel ? (
+                <Text variant="caption" color="textMuted" align="center">
+                  {t('platform.bookings.freeUntil', { time: deadlineLabel })}
+                </Text>
+              ) : null}
+              <Button title={t('platform.bookings.cancel')} icon="close-circle-outline" variant="outline" fullWidth onPress={() => setConfirming(true)} />
+            </View>
+          ) : (
+            <Card tone="muted" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Ionicons name={started ? 'play-circle-outline' : 'information-circle-outline'} size={20} color={colors.textMuted} />
+              <Text variant="caption" color="textMuted" style={{ flex: 1 }}>
+                {started ? t('platform.bookings.startedContact') : t('platform.bookings.contactToCancel')}
+              </Text>
+            </Card>
+          )
         ) : (
           <Button title={t('platform.bookings.bookAgain')} icon="refresh" fullWidth onPress={() => router.push(`/venues/${b.venueId}/book` as never)} />
         )}

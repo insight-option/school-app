@@ -62,11 +62,41 @@ export function remainingPath(p: LatLng, line: LatLng[], maxOffRouteMeters = 500
   return remainingPathFrom(p, line, maxOffRouteMeters).points;
 }
 
-/** Like remainingPath, also returning the index of the first original vertex still ahead (-1 = whole line). */
+/** Distance in metres from `p` to the segment a–b (local flat-earth projection, fine below ~50 km). */
+export function distanceToSegmentMeters(p: LatLng, a: LatLng, b: LatLng): number {
+  const k = Math.cos((p.lat * Math.PI) / 180);
+  const ax = (a.lng - p.lng) * k;
+  const ay = a.lat - p.lat;
+  const bx = (b.lng - p.lng) * k;
+  const by = b.lat - p.lat;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+  const x = ax + t * dx;
+  const y = ay + t * dy;
+  return Math.sqrt(x * x + y * y) * 111_320;
+}
+
+/**
+ * Like remainingPath, also returning the index of the segment the bus is on (-1 = whole line).
+ * The bus is matched to the FIRST stretch of the route that passes close to it – not the globally
+ * closest point – so a route that later comes back past the bus (out to a pickup, back towards
+ * school) never hides the part still to drive.
+ */
 export function remainingPathFrom(p: LatLng, line: LatLng[], maxOffRouteMeters = 500): { points: LatLng[]; startIndex: number } {
   if (line.length < 2) return { points: line, startIndex: -1 };
-  const i = nearestVertexIndex(p, line);
-  if (haversineMeters(p, line[i]) > maxOffRouteMeters) return { points: line, startIndex: -1 };
+  const d: number[] = [];
+  let best = Infinity;
+  for (let i = 0; i < line.length - 1; i++) {
+    d.push(distanceToSegmentMeters(p, line[i], line[i + 1]));
+    best = Math.min(best, d[i]);
+  }
+  if (best > maxOffRouteMeters) return { points: line, startIndex: -1 };
+  const tolerance = best + 40;
+  let i = d.findIndex((x) => x <= tolerance);
+  // closest segment within that first nearby stretch
+  for (let j = i + 1; j < d.length && d[j] <= tolerance; j++) if (d[j] < d[i]) i = j;
   return { points: [p, ...line.slice(i + 1)], startIndex: i };
 }
 

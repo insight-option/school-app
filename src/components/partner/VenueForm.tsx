@@ -6,7 +6,7 @@ import { activeCategories, AMENITY_ICONS, AMENITY_KEYS, categoryName, useCategor
 import type { Business, Venue } from '../../lib/data/client';
 import type { VenuePayload } from '../../features/partner';
 import type { LatLng } from '../../lib/geo';
-import { parseHours, type OpeningHours } from '../../../amplify/functions/shared/booking';
+import { hoursProblem, parseHours, type OpeningHours } from '../../../amplify/functions/shared/booking';
 import { ChipSelect, FieldLabel, FormSection, LocationField, RadioCards, Segmented, Stepper } from './fields';
 import { DEFAULT_HOURS, OpeningHoursEditor, hasAnyOpenDay } from './OpeningHoursEditor';
 import { PhotoGrid } from './PhotoGrid';
@@ -47,7 +47,7 @@ export type VenueDraft = {
   whatsapp: string;
 };
 
-export type VenueErrors = Partial<Record<'name' | 'categoryId' | 'price' | 'hours' | 'duration', string>>;
+export type VenueErrors = Partial<Record<'name' | 'categoryId' | 'price' | 'hours' | 'duration' | 'contact', string>>;
 
 const SLOTS = [30, 60, 90, 120];
 
@@ -88,7 +88,7 @@ export function draftFromVenue(v: Venue | null | undefined): VenueDraft {
   };
 }
 
-export function validateVenue(d: VenueDraft, t: (k: string) => string): VenueErrors {
+export function validateVenue(d: VenueDraft, t: (k: string) => string, business?: Pick<Business, 'phone' | 'whatsapp'> | null): VenueErrors {
   const e: VenueErrors = {};
   if (d.name.trim().length < 2) e.name = t('partner.venueForm.errors.name');
   if (!d.categoryId) e.categoryId = t('partner.venueForm.errors.category');
@@ -97,7 +97,9 @@ export function validateVenue(d: VenueDraft, t: (k: string) => string): VenueErr
     if (!d.price.trim() || !isFinite(n) || n <= 0) e.price = t('partner.venueForm.errors.price');
   }
   if (!hasAnyOpenDay(d.hours)) e.hours = t('partner.venueForm.errors.hours');
+  else if (hoursProblem(d.hours)) e.hours = t('partner.venueForm.errors.hoursOverlap');
   if (d.maxDuration < d.minDuration) e.duration = t('partner.venueForm.errors.duration');
+  if (d.bookingMode === 'CONTACT' && !d.phone.trim() && !d.whatsapp.trim() && !business?.phone && !business?.whatsapp) e.contact = t('partner.venueForm.contactNeedsPhone');
   return e;
 }
 
@@ -269,6 +271,11 @@ export function VenueForm({ draft, onChange, errors, business }: { draft: VenueD
           onChange={(v) => onChange({ bookingMode: v })}
           options={(['INSTANT', 'REQUEST', 'CONTACT'] as BookingMode[]).map((m) => ({ value: m, label: t(`platform.bookingMode.${m}`), icon: m === 'INSTANT' ? 'flash-outline' : m === 'REQUEST' ? 'hand-left-outline' : 'call-outline' }))}
         />
+        {errors.contact ? (
+          <Text variant="caption" color="danger">
+            {errors.contact}
+          </Text>
+        ) : null}
         <View style={styles.grid}>
           <View style={styles.gridItem}>
             <FieldLabel>{t('partner.venueForm.advanceDays')}</FieldLabel>

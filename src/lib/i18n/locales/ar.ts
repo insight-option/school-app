@@ -4,14 +4,16 @@ import { arSchools } from './ar.schools';
 import { arPlatform } from './ar.platform';
 import { arOwner } from './ar.owner';
 import { arPartner } from './ar.partner';
+import { arTransport } from './ar.transport';
 
 export const ar: TranslationKeys = {
   ...arSchools,
   ...arPlatform,
   ...arOwner,
   ...arPartner,
+  ...arTransport,
   common: {
-    appName: 'حافلة المدرسة',
+    appName: 'ون كيو',
     ok: 'حسنًا',
     cancel: 'إلغاء',
     save: 'حفظ',

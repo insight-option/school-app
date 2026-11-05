@@ -2,14 +2,16 @@ import { enSchools } from './en.schools';
 import { enPlatform } from './en.platform';
 import { enOwner } from './en.owner';
 import { enPartner } from './en.partner';
+import { enTransport } from './en.transport';
 
 export const en = {
   ...enSchools,
   ...enPlatform,
   ...enOwner,
   ...enPartner,
+  ...enTransport,
   common: {
-    appName: 'School Bus',
+    appName: 'OneQ',
     ok: 'OK',
     cancel: 'Cancel',
     save: 'Save',

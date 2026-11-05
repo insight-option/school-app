@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppTabBar, CountBadge, Text, useTheme, type TabSpec } from '../../ui';
 import { SchoolLogo } from '../../components/media/StorageImage';
-import { useBusinessBookings, useBusinessBookingsLive, useMyBusiness, useQatarClock } from '../../features/partner';
+import { hasEnded, useBusinessBookings, useBusinessBookingsLive, useMyBusiness, useQatarClock } from '../../features/partner';
 
 export const PARTNER_SECTIONS = [
   { name: 'dashboard', icon: 'grid-outline', active: 'grid', key: 'partner.tabs.dashboard' },
@@ -21,7 +21,7 @@ export const PARTNER_SECTIONS = [
 function usePendingCount(): number {
   const bookings = useBusinessBookings();
   const now = useQatarClock();
-  return useMemo(() => (bookings.data ?? []).filter((b) => b.status === 'PENDING' && b.date >= now.date).length, [bookings.data, now.date]);
+  return useMemo(() => (bookings.data ?? []).filter((b) => b.status === 'PENDING' && !hasEnded(b, now)).length, [bookings.data, now]);
 }
 
 /** Partner workspace: sidebar on tablets / desktop web, floating bottom bar on phones. */

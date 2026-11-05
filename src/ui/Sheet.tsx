@@ -41,7 +41,7 @@ export function Sheet({ visible, onClose, title, children, footer, scroll = true
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={dismissable ? onClose : undefined} statusBarTranslucent>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.fill}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'web' ? undefined : 'padding'} style={styles.fill}>
         <View style={[styles.fill, { backgroundColor: colors.overlay, justifyContent: wide ? 'center' : 'flex-end', alignItems: 'center' }]}>
           <Pressable accessibilityLabel="Close" style={StyleSheet.absoluteFill} onPress={dismissable ? onClose : undefined} />
           <Animated.View

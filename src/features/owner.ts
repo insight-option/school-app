@@ -564,15 +564,11 @@ export function useSeedCategories() {
   return useMutation({
     mutationFn: async (existing: Category[]) => {
       const slugs = new Set(existing.map((c) => c.slug));
-      let order = existing.reduce((m, c) => Math.max(m, c.order ?? 0), 0);
-      let added = 0;
-      for (const d of DEFAULT_CATEGORIES) {
-        if (slugs.has(d.slug)) continue;
-        order += 1;
-        unwrap(await client.models.Category.create({ ...d, order, active: true }), 'category');
-        added++;
-      }
-      return added;
+      const start = existing.reduce((m, c) => Math.max(m, c.order ?? 0), 0);
+      const missing = DEFAULT_CATEGORIES.filter((d) => !slugs.has(d.slug));
+      // created together (one round trip instead of eleven); the order keeps the list's sequence
+      await Promise.all(missing.map(async (d, i) => unwrap(await client.models.Category.create({ ...d, order: start + i + 1, active: true }), 'category')));
+      return missing.length;
     },
     onSuccess: () => void qc.invalidateQueries({ queryKey: platformKeys.categories }),
   });

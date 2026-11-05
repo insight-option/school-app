@@ -1,7 +1,8 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, AppState, Platform, StyleSheet, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
+import { useFocusEffect } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import * as WebBrowser from 'expo-web-browser';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +18,6 @@ import { toast } from '../../ui/Toast';
 import { useSession } from '../../lib/auth/session';
 import { useMyProfile } from '../../features/profiles';
 import {
-  isOfficeSeat,
   officeSeatId,
   useConversation,
   useConversationMembers,
@@ -28,7 +28,7 @@ import {
   useReportMessage,
   useSendMessage,
 } from '../../features/messaging';
-import type { Message } from '../../lib/data/client';
+import { client, listAll, type Conversation, type Message, type Profile } from '../../lib/data/client';
 import { randomId } from '../../lib/storage/s3';
 import { relativeDay } from '../../lib/util/format';
 import { copyText } from '../../lib/util/device';
@@ -44,7 +44,6 @@ type Row = { kind: 'day'; id: string; label: string } | { kind: 'message'; id: s
 export function ChatScreen({ conversationId }: { conversationId: string }) {
   const { t } = useTranslation();
   const theme = useTheme();
-  const router = useRouter();
   const session = useSession();
   const me = useMyProfile();
   const seatUserId = session.role === 'ADMIN' ? officeSeatId(session.schoolId) : (session.userId ?? '');
@@ -65,18 +64,37 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
   const [reporting, setReporting] = useState(false);
   const [media, setMedia] = useState<MediaItem | null>(null);
   const [showMembers, setShowMembers] = useState(false);
+  const people = useGroupPeople(conversation.data, showMembers);
   const listRef = useRef<React.ComponentRef<typeof FlashList<Row>>>(null);
 
-  // Viewing state: unread → 0 and suppress pushes while this screen is focused.
+  // Viewing state: unread → 0 and suppress pushes while this screen is focused *and* the app is in
+  // the foreground (a chat left open in the background must still notify).
+  const [focused, setFocused] = useState(false);
   useFocusEffect(
     useCallback(() => {
-      if (seatUserId) markRead.mutate({ conversationId, seatUserId, viewing: true });
-      return () => {
-        if (seatUserId) markRead.mutate({ conversationId, seatUserId, viewing: false });
-      };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [conversationId, seatUserId]),
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
   );
+  const [foreground, setForeground] = useState(AppState.currentState !== 'background');
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => setForeground(s === 'active'));
+    return () => sub.remove();
+  }, []);
+  const viewing = focused && foreground;
+  useEffect(() => {
+    if (!seatUserId) return;
+    if (viewing) markRead.mutate({ conversationId, seatUserId, viewing: true });
+    return () => {
+      if (viewing) markRead.mutate({ conversationId, seatUserId, viewing: false });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, seatUserId, viewing]);
+  const closeMenu = () => {
+    setMenuMsg(null);
+    setReporting(false);
+    setReportReason('');
+  };
 
   const myTitle = useMemo(() => {
     const mine = members.data?.find((m) => m.userId === seatUserId);
@@ -226,14 +244,14 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
       </View>
       <Composer onSendText={sendText} onSendAttachments={sendAttachments} disabled={!conversation.data} />
 
-      <Sheet visible={!!menuMsg} onClose={() => setMenuMsg(null)} title={menuMsg?.senderName} scroll={false}>
+      <Sheet visible={!!menuMsg} onClose={closeMenu} title={menuMsg?.senderName} scroll={false}>
         {menuMsg?.text ? (
           <ListItem
             icon="copy-outline"
             title={t('common.copy')}
             onPress={() => {
               void copyText(menuMsg.text!, t('common.copied'));
-              setMenuMsg(null);
+              closeMenu();
             }}
           />
         ) : null}
@@ -252,7 +270,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
             title={t('chat.deleteMessage')}
             onPress={() => {
               remove.mutate(menuMsg, { onSuccess: () => toast.success(t('chat.deleted')), onError: (e) => toast.error(e.message) });
-              setMenuMsg(null);
+              closeMenu();
             }}
           />
         ) : null}
@@ -270,9 +288,7 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
                   {
                     onSuccess: () => {
                       toast.success(t('chat.reported'));
-                      setMenuMsg(null);
-                      setReporting(false);
-                      setReportReason('');
+                      closeMenu();
                     },
                     onError: (e) => toast.error(e.message),
                   },
@@ -284,28 +300,40 @@ export function ChatScreen({ conversationId }: { conversationId: string }) {
       </Sheet>
 
       <Sheet visible={showMembers} onClose={() => setShowMembers(false)} title={t('chat.members')}>
-        {(members.data ?? [])
-          .filter((m) => !isOfficeSeat(m.userId) || session.role === 'ADMIN')
-          .map((m) => (
-            <ListItem
-              key={m.userId}
-              title={isOfficeSeat(m.userId) ? t('chat.office') : m.title}
-              subtitle={m.role ?? undefined}
-              left={<Avatar name={m.title} avatarKey={m.avatarKey} size={36} />}
-              onPress={
-                !isOfficeSeat(m.userId) && m.userId !== session.userId && session.role !== 'ADMIN'
-                  ? undefined
-                  : undefined
-              }
-            />
-          ))}
+        {people.isLoading && !people.data ? <ActivityIndicator color={theme.colors.primary} style={{ marginVertical: 16 }} /> : null}
+        {(people.data ?? []).map((p) => (
+          <ListItem key={p.userId} title={p.fullName} subtitle={[t(`roles.${p.role}`, { defaultValue: p.role }), p.role === 'STUDENT' ? p.className : p.role === 'DRIVER' ? p.busName : null].filter(Boolean).join(' · ')} left={<Avatar name={p.fullName} avatarKey={p.avatarKey} size={36} />} />
+        ))}
       </Sheet>
 
       <MediaViewer item={media} onClose={() => setMedia(null)} />
-      {Platform.OS === 'web' ? null : <View style={{ height: 0 }} />}
-      {router ? null : null}
     </Screen>
   );
+}
+
+/**
+ * People in a class / bus group. Membership rows only carry the group title (and members can read
+ * just their own row), so the list comes from the school's profiles: teacher + class, driver + riders.
+ */
+function useGroupPeople(conv: Conversation | null | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ['groupPeople', conv?.id ?? ''],
+    enabled: enabled && !!conv && ((conv.type === 'CLASS_GROUP' && !!conv.classId) || (conv.type === 'BUS_GROUP' && !!conv.busId)),
+    staleTime: 60_000,
+    queryFn: async (): Promise<Profile[]> => {
+      if (conv!.type === 'CLASS_GROUP') {
+        const classId = conv!.classId!;
+        const [students, cls] = await Promise.all([
+          listAll((nextToken) => client.models.Profile.listProfilesByClass({ classId }, { limit: 200, nextToken })),
+          client.models.Class.get({ id: classId }),
+        ]);
+        const teacher = cls.data?.teacherId ? (await client.models.Profile.get({ userId: cls.data.teacherId })).data : null;
+        return [...(teacher ? [teacher] : []), ...students.filter((p) => p.role === 'STUDENT' && p.isActive !== false)];
+      }
+      const riders = await listAll((nextToken) => client.models.Profile.listProfilesByBus({ busId: conv!.busId! }, { limit: 200, nextToken }));
+      return riders.filter((p) => p.isActive !== false).sort((a, b) => Number(b.role === 'DRIVER') - Number(a.role === 'DRIVER'));
+    },
+  });
 }
 
 const styles = StyleSheet.create({

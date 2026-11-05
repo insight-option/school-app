@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View } from 'react-native';
+import { Linking, Platform, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Badge, Button, Chip, Sheet, Text, useTheme } from '../../ui';
@@ -54,7 +55,21 @@ export function StopSheet({ stop, tripId, tripType, nearby, onClose }: { stop: T
           {stop.order < 900 ? <Badge label={`#${stop.order}`} /> : null}
           <Badge label={`${t('driver.eta')} ${formatEta(stop.etaSeconds)} · ${formatDistance(stop.distanceMeters)}`} tone="primary" />
         </View>
-        {stop.homeAddress ? <Text color="textMuted">{stop.homeAddress}</Text> : null}
+        {stop.pickupLabel || stop.homeAddress ? (
+          <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
+            <Ionicons name="location" size={18} color={theme.colors.primary} style={{ marginTop: 2 }} />
+            <View style={{ flex: 1 }}>
+              {stop.pickupLabel ? <Text variant="bodyStrong">{stop.pickupLabel}</Text> : null}
+              {stop.homeAddress ? <Text color="textMuted">{stop.homeAddress}</Text> : null}
+            </View>
+          </View>
+        ) : null}
+        {stop.pickupNote ? (
+          <View style={{ flexDirection: 'row', gap: 10, padding: 12, borderRadius: theme.radius.md, backgroundColor: theme.colors.warningSoft }}>
+            <Ionicons name="information-circle" size={18} color={theme.colors.warning} />
+            <Text style={{ flex: 1 }}>{stop.pickupNote}</Text>
+          </View>
+        ) : null}
         {stop.skipReason ? (
           <Text variant="caption" color="danger">
             {stop.skipReason}
@@ -68,6 +83,7 @@ export function StopSheet({ stop, tripId, tripType, nearby, onClose }: { stop: T
 
         <View style={{ flexDirection: 'row', gap: theme.spacing.sm }}>
           {stop.parentPhone ? <Button title={t('driver.callParent')} variant="secondary" icon="call" onPress={() => callPhone(stop.parentPhone)} style={{ flex: 1 }} /> : null}
+          {stop.location ? <Button title={t('transport.navigate')} variant="secondary" icon="navigate" onPress={() => void openNavigation(stop.location!)} style={{ flex: 1 }} /> : null}
           <Button
             title={t('driver.messageParent')}
             variant="outline"
@@ -124,4 +140,16 @@ export function StopSheet({ stop, tripId, tripType, nearby, onClose }: { stop: T
       </View>
     </Sheet>
   );
+}
+
+/** Turn-by-turn in Google Maps (app if installed, browser otherwise). */
+async function openNavigation(p: { lat: number; lng: number }) {
+  const native = Platform.OS === 'android' ? `google.navigation:q=${p.lat},${p.lng}&mode=d` : `comgooglemaps://?daddr=${p.lat},${p.lng}&directionsmode=driving`;
+  const web = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}&travelmode=driving`;
+  try {
+    if (Platform.OS !== 'web' && (await Linking.canOpenURL(native))) return await Linking.openURL(native);
+  } catch {
+    // fall back to the browser link
+  }
+  await Linking.openURL(web);
 }

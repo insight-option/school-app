@@ -8,7 +8,7 @@ import { Button, Card, EmptyState, Input, Screen, Skeleton, Text, useTheme } fro
 import { toast } from '../../../ui/Toast';
 import { useSession } from '../../../lib/auth/session';
 import { useMyProfile } from '../../../features/profiles';
-import { bookingPrice, formatMoney, parseHours, priceLabel, qatarNow, toMinutes, useBookVenue, useVenue, useVenueAvailability } from '../../../features/platform';
+import { bookingPrice, formatBookingDate, formatMoney, parseHours, priceLabel, qatarNow, toMinutes, useBookVenue, useConsumeReturnTo, useVenue, useVenueAvailability } from '../../../features/platform';
 import { addDays, dayIntervals, fromMinutes, weekdayOf } from '../../../../amplify/functions/shared/booking';
 import { haptic } from '../../../lib/util/device';
 import type { Booking } from '../../../lib/data/client';
@@ -27,6 +27,7 @@ export default function BookVenueScreen() {
   const venue = useVenue(venueId);
   const me = useMyProfile();
   const book = useBookVenue();
+  useConsumeReturnTo(`/venues/${venueId}/book`);
 
   const [today] = useState(() => qatarNow().date);
   const v = venue.data;
@@ -91,6 +92,35 @@ export default function BookVenueScreen() {
     );
   }
 
+  // Bookings belong to a customer account (other workspaces have no "My bookings").
+  if (session.role !== 'CUSTOMER' && session.role !== 'OWNER') {
+    return (
+      <Screen back title={v.name} maxWidth={560}>
+        <EmptyState
+          icon={session.role ? 'person-circle-outline' : 'sparkles-outline'}
+          title={session.role ? t('platform.book.customerOnlyTitle') : t('platform.book.finishSetupTitle')}
+          body={session.role ? t('platform.book.customerOnlyBody') : t('platform.book.finishSetupBody')}
+          actionLabel={session.role ? t('platform.book.openWorkspace') : t('platform.book.finishSetup')}
+          onAction={() => router.replace((session.role ? '/' : '/onboarding') as never)}
+        />
+      </Screen>
+    );
+  }
+
+  if (v.bookingMode === 'CONTACT' || v.directory !== 'PUBLIC') {
+    return (
+      <Screen back title={v.name} maxWidth={560}>
+        <EmptyState
+          icon={v.bookingMode === 'CONTACT' ? 'call-outline' : 'pause-circle-outline'}
+          title={v.bookingMode === 'CONTACT' ? t('platform.venue.contactToBook') : t('platform.book.unavailableTitle')}
+          body={v.bookingMode === 'CONTACT' ? t('platform.book.contactBody') : t('platform.book.unavailableBody')}
+          actionLabel={t('platform.venue.back')}
+          onAction={() => (router.canGoBack() ? router.back() : router.replace(`/venues/${v.id}` as never))}
+        />
+      </Screen>
+    );
+  }
+
   if (done) {
     const confirmed = done.status === 'CONFIRMED';
     return (
@@ -103,7 +133,7 @@ export default function BookVenueScreen() {
             {confirmed ? t('platform.book.successTitle') : t('platform.book.successRequestTitle')}
           </Text>
           <Text color="textMuted" align="center">
-            {t('platform.book.successBody', { venue: v.name, when: `${done.date} · ${done.startTime}–${done.endTime}` })}
+            {t('platform.book.successBody', { venue: v.name, when: `${formatBookingDate(done.date, i18n.language)} · ${done.startTime}–${done.endTime}` })}
           </Text>
           <View style={[styles.ref, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text variant="bodyStrong" weight="800" style={{ letterSpacing: 1 }}>
@@ -147,8 +177,13 @@ export default function BookVenueScreen() {
   const closedDay = dayIntervals(hours, activeDate).length === 0;
 
   return (
-    <Screen back title={t('platform.book.title', { name: v.name })} subtitle={priceLabel(v, t, i18n.language)} maxWidth={720} padded={false}>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: 140 + insets.bottom, gap: spacing.xl }} keyboardShouldPersistTaps="handled">
+    <Screen back title={t('platform.book.title', { name: v.name })} subtitle={priceLabel(v, t, i18n.language)} maxWidth={720} padded={false} keyboard>
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: 140 + insets.bottom, gap: spacing.xl }}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets
+      >
         {/* ── Day ── */}
         <View style={{ gap: 10 }}>
           <Text variant="overline" color="textMuted">
@@ -285,7 +320,7 @@ export default function BookVenueScreen() {
       <View style={[styles.bar, { paddingBottom: insets.bottom + 12, backgroundColor: colors.surface, borderTopColor: colors.border }, theme.shadow.sheet]}>
         <View style={{ flex: 1, gap: 2 }}>
           <Text variant="label" color="textMuted" style={{ letterSpacing: 0 }}>
-            {chosen ? `${activeDate} · ${chosen}–${fromMinutes(toMinutes(chosen) + dur)}` : t('platform.book.pickTime')}
+            {chosen ? `${formatBookingDate(activeDate, i18n.language)} · ${chosen}–${fromMinutes(toMinutes(chosen) + dur)}` : t('platform.book.pickTime')}
           </Text>
           <Text variant="heading" weight="800">
             {price == null ? t('platform.price.onRequest') : price === 0 ? t('platform.price.free') : formatMoney(price, v.currency ?? 'QAR', i18n.language)}

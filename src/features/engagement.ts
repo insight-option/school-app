@@ -105,6 +105,8 @@ export function useAllBroadcasts(enabled: boolean) {
     queryKey: qk.broadcasts('school'),
     enabled,
     staleTime: 30_000,
+    // The fan-out runs asynchronously: poll while a broadcast is still queued / sending.
+    refetchInterval: (query) => (query.state.data?.some((b) => b.deliveryStatus === 'PENDING' || b.deliveryStatus === 'SENDING') ? 3000 : false),
     queryFn: async () => listAll((nextToken) => client.models.Broadcast.listBroadcastsBySchool({ schoolId: session.schoolId }, { limit: 50, nextToken, sortDirection: 'DESC' })),
   });
 }
@@ -132,10 +134,18 @@ export function useSendBroadcast() {
         'broadcast',
       );
       if (!created) throw new Error('broadcast not created');
-      await client.mutations.sendBroadcast({ broadcastId: created.id });
+      const res = await client.mutations.sendBroadcast({ broadcastId: created.id });
+      if (res.errors?.length) {
+        await client.models.Broadcast.update({ id: created.id, deliveryStatus: 'FAILED' });
+        throw new Error(res.errors.map((e) => e.message).join('; '));
+      }
       return created;
     },
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['broadcasts'] }),
+    onSuccess: (created) => {
+      // Show it at once (as "queued"); polling above picks up the delivery status.
+      qc.setQueryData<Broadcast[]>(qk.broadcasts('school'), (old) => (old ? [created, ...old.filter((b) => b.id !== created.id)] : old));
+      void qc.invalidateQueries({ queryKey: ['broadcasts'] });
+    },
   });
 }
 
@@ -188,7 +198,17 @@ export function useMarkNotificationsRead() {
       await Promise.all(items.filter((n) => !n.read).map((n) => client.models.Notification.update({ id: n.id, read: true })));
       return items.map((n) => n.userId)[0];
     },
-    onSuccess: (userId) => {
+    // Badges clear immediately; no refetch round-trip needed.
+    onMutate: (items) => {
+      const userId = items[0]?.userId;
+      if (!userId) return;
+      const ids = new Set(items.map((n) => n.id));
+      qc.setQueryData<{ pages: { items: Notification[]; nextToken: string | null }[]; pageParams: unknown[] }>(qk.notifications(userId), (old) =>
+        old ? { ...old, pages: old.pages.map((p) => ({ ...p, items: p.items.map((n) => (ids.has(n.id) ? { ...n, read: true } : n)) })) } : old,
+      );
+    },
+    onError: (_e, items) => {
+      const userId = items[0]?.userId;
       if (userId) void qc.invalidateQueries({ queryKey: qk.notifications(userId) });
     },
   });

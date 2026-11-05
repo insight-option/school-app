@@ -12,6 +12,8 @@ export type ScreenProps = {
   subtitle?: string;
   back?: boolean;
   right?: React.ReactNode;
+  /** Row above the title (e.g. the student's pickup switcher + bell). */
+  topBar?: React.ReactNode;
   scroll?: boolean;
   padded?: boolean;
   edges?: Edge[];
@@ -24,7 +26,7 @@ export type ScreenProps = {
 };
 
 /** Page container: safe area, optional header (title/back), scroll + pull-to-refresh, keyboard avoidance. */
-export function Screen({ children, title, subtitle, back, right, scroll, padded = true, edges, refreshing, onRefresh, style, contentStyle, keyboard, maxWidth }: ScreenProps) {
+export function Screen({ children, title, subtitle, back, right, topBar, scroll, padded = true, edges, refreshing, onRefresh, style, contentStyle, keyboard, maxWidth }: ScreenProps) {
   const theme = useTheme();
   const { colors, spacing } = theme;
   const router = useRouter();
@@ -78,9 +80,11 @@ export function Screen({ children, title, subtitle, back, right, scroll, padded 
 
   return (
     <SafeAreaView edges={edges ?? ['top', 'left', 'right']} style={[styles.fill, { backgroundColor: colors.background }, style]}>
+      {topBar}
       {header}
+      {/* Android draws edge-to-edge, so the window no longer resizes for the keyboard: pad on both platforms. */}
       {keyboard ? (
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.fill} keyboardVerticalOffset={0}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'web' ? undefined : 'padding'} style={styles.fill} keyboardVerticalOffset={0}>
           {body}
         </KeyboardAvoidingView>
       ) : (

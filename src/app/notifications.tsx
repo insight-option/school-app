@@ -11,7 +11,8 @@ import { parseJson, type Notification, type NotificationType } from '../lib/data
 import { timeAgoShort } from '../lib/util/format';
 import { routeForPush, type PushData } from '../lib/push/notifications';
 
-const ICONS: Record<NotificationType, keyof typeof Ionicons.glyphMap> = {
+// Partial: new notification types must not break the build (they fall back to a bell).
+const ICONS: Partial<Record<NotificationType, keyof typeof Ionicons.glyphMap>> = {
   ALARM: 'alarm',
   MESSAGE: 'chatbubble-ellipses',
   FEEDBACK: 'ribbon',
@@ -22,6 +23,7 @@ const ICONS: Record<NotificationType, keyof typeof Ionicons.glyphMap> = {
   SYSTEM: 'information-circle',
   APPLICATION: 'document-text',
   BOOKING: 'calendar',
+  TRIP: 'navigate',
 };
 
 export default function NotificationsScreen() {
@@ -42,7 +44,13 @@ export default function NotificationsScreen() {
   }, [items.length]);
 
   const open = (n: Notification) => {
-    const data = parseJson<PushData>(n.data) ?? {};
+    const data = parseJson<PushData & { kind?: string; userId?: string }>(n.data) ?? {};
+    // Office notices carry what they are about in `kind` (push routing only knows the type).
+    if (session.role === 'ADMIN') {
+      if (data.kind === 'MESSAGE_REPORT') return router.push('/(admin)/messages' as never);
+      if ((data.kind === 'HOME_LOCATION_CHANGED' || data.kind === 'DATA_DELETION_REQUEST') && data.userId) return router.push(`/(admin)/students/${data.userId}` as never);
+    }
+    if (n.type === 'MESSAGE' && data.conversationId) return router.push(`/chat/${data.conversationId}` as never);
     const route = routeForPush({ type: n.type as PushData['type'], ...data }, session.role);
     if (route && route !== '/notifications') router.push(route as never);
   };

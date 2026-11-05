@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { useTranslation } from 'react-i18next';
@@ -7,8 +7,10 @@ import { useAuditLog } from '../../features/ops';
 import { parseJson, type AuditLog } from '../../lib/data/client';
 import { formatDateTime } from '../../lib/util/format';
 
-const ACTIONS = ['CREATE_STUDENT', 'CREATE_TEACHER', 'CREATE_BUS', 'ASSIGN_STUDENT', 'ASSIGN_TEACHER', 'RESET_PASSWORD', 'DISABLE_USER', 'ENABLE_USER', 'DELETE_USER', 'START_TRIP', 'END_TRIP', 'UPDATE_HOME_LOCATION', 'SUBMIT_FEEDBACK', 'SEND_BROADCAST', 'BULK_IMPORT', 'REQUEST_DATA_DELETION'];
-const ENTITIES = ['Profile', 'Bus', 'Trip', 'Feedback', 'Broadcast', 'ImportJob'];
+const ACTIONS = ['CREATE_STUDENT', 'CREATE_TEACHER', 'CREATE_BUS', 'ASSIGN_STUDENT', 'ASSIGN_TEACHER', 'UPDATE_CONTACT', 'RESET_PASSWORD', 'DISABLE_USER', 'ENABLE_USER', 'DELETE_USER', 'START_TRIP', 'END_TRIP', 'UPDATE_HOME_LOCATION', 'SUBMIT_FEEDBACK', 'SEND_BROADCAST', 'BULK_IMPORT', 'SUBMIT_APPLICATION', 'REVIEW_APPLICATION', 'UPDATE_SCHOOL_PROFILE', 'REQUEST_DATA_DELETION'];
+const ENTITIES = ['Profile', 'Bus', 'Trip', 'Feedback', 'Broadcast', 'Application', 'School', 'ImportJob'];
+/** CREATE_STUDENT → "Create student" (audit codes are English-only identifiers). */
+const humanize = (code: string) => code.charAt(0) + code.slice(1).toLowerCase().replace(/_/g, ' ');
 
 export default function AdminAudit() {
   const { t } = useTranslation();
@@ -18,6 +20,13 @@ export default function AdminAudit() {
   const q = useAuditLog(true, { action, entityType: entity });
   const [open, setOpen] = useState<AuditLog | null>(null);
   const items = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
+  // A filter is applied after DynamoDB reads 50 rows, so a page can come back empty while matches
+  // exist further back: fetch on (bounded) until something shows up.
+  const pages = q.data?.pages.length ?? 0;
+  const filtered = !!action || !!entity;
+  useEffect(() => {
+    if (filtered && items.length < 20 && q.hasNextPage && !q.isFetchingNextPage && pages < 20) void q.fetchNextPage();
+  }, [filtered, items.length, pages, q]);
 
   return (
     <Screen padded={false} title={t('admin.audit')}>
@@ -25,7 +34,7 @@ export default function AdminAudit() {
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: theme.spacing.lg }}>
           <Chip label={`${t('admin.filterAction')}: ${t('common.all')}`} selected={!action} onPress={() => setAction(undefined)} />
           {ACTIONS.map((a) => (
-            <Chip key={a} label={a} selected={action === a} onPress={() => setAction(a)} />
+            <Chip key={a} label={humanize(a)} selected={action === a} onPress={() => setAction(a)} />
           ))}
         </ScrollView>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: theme.spacing.lg }}>
@@ -46,11 +55,11 @@ export default function AdminAudit() {
           onRefresh={() => q.refetch()}
           ListEmptyComponent={<EmptyState icon="document-text-outline" title={t('admin.auditEmpty')} compact />}
           renderItem={({ item }) => (
-            <ListItem title={item.action} subtitle={`${item.actorName ?? item.actorId} → ${item.entityType} ${item.entityId.slice(0, 12)}`} meta={formatDateTime(item.occurredAt)} right={<Badge label={item.entityType} size="sm" />} onPress={() => setOpen(item)} />
+            <ListItem title={humanize(item.action)} subtitle={`${item.actorName ?? item.actorId} → ${item.entityType} ${item.entityId.slice(0, 12)}`} meta={formatDateTime(item.occurredAt)} right={<Badge label={item.entityType} size="sm" />} onPress={() => setOpen(item)} />
           )}
         />
       )}
-      <Sheet visible={!!open} onClose={() => setOpen(null)} title={open?.action}>
+      <Sheet visible={!!open} onClose={() => setOpen(null)} title={open ? humanize(open.action) : undefined}>
         {open ? (
           <View style={{ gap: 8 }}>
             <Text variant="caption" color="textMuted">

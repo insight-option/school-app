@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Avatar, Badge, Button, Chip, EmptyState, Input, ListItem, Screen, SkeletonList, useTheme } from '../../../ui';
 import { useSession } from '../../../lib/auth/session';
@@ -11,6 +11,8 @@ import { useSettings } from '../../../features/settings';
 import { useAbsencesOnDate } from '../../../features/dayStatus';
 import { useBroadcastsForMe } from '../../../features/engagement';
 import { todayIn } from '../../../lib/util/format';
+import { kv } from '../../../lib/storage/mmkv';
+import { BROADCASTS_SEEN_KEY } from '../broadcasts';
 
 export default function TeacherClass() {
   const { t } = useTranslation();
@@ -32,7 +34,13 @@ export default function TeacherClass() {
     const q = query.trim().toLowerCase();
     return (roster.data ?? []).filter((p) => p.role === 'STUDENT' && (!q || p.fullName.toLowerCase().includes(q) || p.username.toLowerCase().includes(q)));
   }, [roster.data, query]);
-  const unreadBroadcasts = broadcasts.data?.length ?? 0;
+  const [seenAt, setSeenAt] = useState(() => kv.getString(BROADCASTS_SEEN_KEY) ?? '');
+  useFocusEffect(
+    useCallback(() => {
+      setSeenAt(kv.getString(BROADCASTS_SEEN_KEY) ?? '');
+    }, []),
+  );
+  const unreadBroadcasts = (broadcasts.data ?? []).filter((b) => b.postedAt > seenAt).length;
 
   return (
     <Screen

@@ -71,7 +71,15 @@ export default function VenueScreen() {
   const phone = v.phone || business.data?.phone;
   const whatsapp = v.whatsapp || business.data?.whatsapp;
   const unitLabel = v.unitLabel || t('platform.venue.unitDefault');
-  const ctaLabel = v.bookingMode === 'CONTACT' ? t('platform.venue.contactToBook') : v.bookingMode === 'REQUEST' ? t('platform.venue.requestBooking') : t('platform.venue.bookNow');
+  // Hidden / paused venues (link shared earlier) still show their page but take no bookings.
+  const bookable = v.directory === 'PUBLIC';
+  const ctaLabel = !bookable
+    ? t('platform.book.unavailableTitle')
+    : v.bookingMode === 'CONTACT'
+      ? t('platform.venue.contactToBook')
+      : v.bookingMode === 'REQUEST'
+        ? t('platform.venue.requestBooking')
+        : t('platform.venue.bookNow');
 
   const directions = () => {
     if (!v.location) return;
@@ -107,7 +115,11 @@ export default function VenueScreen() {
                 horizontal
                 pagingEnabled
                 showsHorizontalScrollIndicator={false}
-                onMomentumScrollEnd={(e) => setPhotoIndex(Math.round(e.nativeEvent.contentOffset.x / pageWidth))}
+                scrollEventThrottle={64}
+                onScroll={(e) => {
+                  const i = Math.round(e.nativeEvent.contentOffset.x / pageWidth);
+                  if (i !== photoIndex) setPhotoIndex(Math.max(0, Math.min(photos.length - 1, i)));
+                }}
                 style={{ width: pageWidth }}
               >
                 {photos.map((key) => (
@@ -290,7 +302,7 @@ export default function VenueScreen() {
           icon={v.bookingMode === 'CONTACT' ? 'call' : 'calendar'}
           size="lg"
           onPress={book}
-          disabled={v.bookingMode === 'CONTACT' && !phone && !whatsapp}
+          disabled={!bookable || (v.bookingMode === 'CONTACT' && !phone && !whatsapp)}
           style={{ minWidth: 170 }}
           testID="venue-book"
         />

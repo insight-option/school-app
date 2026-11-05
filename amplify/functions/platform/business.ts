@@ -11,10 +11,10 @@ import {
 } from '@aws-sdk/client-cognito-identity-provider';
 import { z } from 'zod';
 import type { Schema } from '../../data/resource';
-import { listAll, nowIso, unwrap, withRetry, type DataClient } from '../shared/data';
+import { listAll, mapLimit, nowIso, unwrap, withRetry, type DataClient } from '../shared/data';
 import { HandlerError, type Caller } from '../shared/types';
 import { DIRECTORY_HIDDEN, DIRECTORY_PUBLIC, normalizeSearch } from '../shared/tenancy';
-import { customerTenantId, newBusinessId, parseHours, toMinutes, WEEKDAYS } from '../shared/booking';
+import { customerTenantId, hoursProblem, newBusinessId, parseHours, qatarNow } from '../shared/booking';
 import { recordEvent, startTrialSubscription } from '../shared/platform';
 
 export type Deps = { client: DataClient; cognito: CognitoIdentityProviderClient; userPoolId: string };
@@ -145,20 +145,26 @@ export async function resolveBusiness(client: DataClient, identity: Caller, requ
 const venueDirectory = (business: Pick<Business, 'status' | 'directory'>, listed: boolean | null | undefined) =>
   business.status === 'ACTIVE' && business.directory === DIRECTORY_PUBLIC && listed !== false ? DIRECTORY_PUBLIC : DIRECTORY_HIDDEN;
 
-/** Re-derives the denormalised business fields and directory flag of every venue of a business. */
+/**
+ * Re-derives the denormalised business fields and directory flag of every venue of a business.
+ * The business's categories are the ones it chose plus every category one of its venues is in.
+ */
 export async function syncVenues(client: DataClient, business: Business) {
   const venues = await listAll((nextToken) => client.models.Venue.listVenuesByBusiness({ businessId: business.businessId }, { limit: 100, nextToken }), 20);
-  for (const v of venues) {
+  await mapLimit(venues, 6, async (v) => {
     const directory = venueDirectory(business, v.listed);
     if (v.directory !== directory || v.businessName !== business.name || v.businessLogoKey !== (business.logoKey ?? null)) {
       await client.models.Venue.update({ id: v.id, directory, businessName: business.name, businessLogoKey: business.logoKey ?? null });
     }
-  }
-  const categoryIds = Array.from(new Set(venues.map((v) => v.categoryId)));
-  if (business.venueCount !== venues.length || JSON.stringify([...(business.categoryIds ?? [])].sort()) !== JSON.stringify([...categoryIds].sort())) {
+  });
+  const chosen = (business.categoryIds ?? []).filter((c): c is string => !!c);
+  const categoryIds = Array.from(new Set([...chosen, ...venues.map((v) => v.categoryId)]));
+  if (business.venueCount !== venues.length || JSON.stringify([...chosen].sort()) !== JSON.stringify([...categoryIds].sort())) {
     await client.models.Business.update({ businessId: business.businessId, venueCount: venues.length, categoryIds });
   }
 }
+
+
 
 // ───────────────────────────── registration ─────────────────────────────
 
@@ -320,14 +326,16 @@ export async function saveVenue(client: DataClient, identity: Caller, raw: unkno
   if (!category || category.active === false) throw new HandlerError('Choose a category', 'VALIDATION');
 
   const hours = input.openingHours ? parseHours(input.openingHours) : null;
-  if (hours) {
-    for (const day of WEEKDAYS) for (const [a, b] of hours[day] ?? []) if (isNaN(toMinutes(a)) || isNaN(toMinutes(b)) || a === b) throw new HandlerError('Opening hours must be HH:mm – HH:mm', 'VALIDATION');
-  }
+  const hoursError = hours ? hoursProblem(hours) : null;
+  if (hoursError) throw new HandlerError(hoursError, 'VALIDATION');
   const slotMinutes = input.slotMinutes ?? 60;
   const minD = input.minDurationMinutes ?? slotMinutes;
   const maxD = input.maxDurationMinutes ?? Math.max(minD, slotMinutes * 3);
   if (minD % slotMinutes !== 0 || maxD % slotMinutes !== 0 || maxD < minD) throw new HandlerError('Durations must be multiples of the slot length (min ≤ max)', 'VALIDATION');
   if (['PER_HOUR', 'PER_SESSION', 'PER_PERSON'].includes(input.priceMode) && (input.price == null || input.price <= 0)) throw new HandlerError('Enter a price, or choose "On request" / "Free"', 'VALIDATION');
+  if (input.bookingMode === 'CONTACT' && !input.phone && !input.whatsapp && !business.phone && !business.whatsapp) {
+    throw new HandlerError('"Contact to book" needs a phone or WhatsApp number', 'VALIDATION');
+  }
 
   let current: Venue | null = null;
   if (input.id) {
@@ -386,11 +394,13 @@ export async function deleteVenue(client: DataClient, identity: Caller, venueId:
   if (!venue) throw new HandlerError('Venue not found', 'NOT_FOUND');
   const business = await resolveBusiness(client, identity, identity.groups.includes('OWNER') ? venue.businessId : null);
   if (venue.businessId !== business.businessId) throw new HandlerError('Venue not found', 'NOT_FOUND');
-  const today = new Date().toISOString().slice(0, 10);
-  const upcoming = (await client.models.Booking.listBookingsByVenue({ venueId, date: { ge: today } }, { limit: 200 })).data.filter((b) => b.status === 'PENDING' || b.status === 'CONFIRMED');
+  const today = qatarNow().date;
+  const upcoming = (
+    await listAll((nextToken) => client.models.Booking.listBookingsByVenue({ venueId, date: { ge: today } }, { limit: 200, nextToken }), 10)
+  ).filter((b) => b.status === 'PENDING' || b.status === 'CONFIRMED');
   if (upcoming.length) throw new HandlerError(`This venue has ${upcoming.length} upcoming booking(s). Cancel them or hide the venue instead.`, 'CONFLICT');
   const slots = await listAll((nextToken) => client.models.VenueSlot.listSlotsByVenueAndDate({ venueId }, { limit: 500, nextToken }), 50);
-  for (const s of slots) await client.models.VenueSlot.delete({ venueId: s.venueId, slotKey: s.slotKey });
+  await mapLimit(slots, 10, (s) => client.models.VenueSlot.delete({ venueId: s.venueId, slotKey: s.slotKey }));
   await client.models.Venue.delete({ id: venueId });
   await syncVenues(client, business);
   return { ok: true, count: 1 };

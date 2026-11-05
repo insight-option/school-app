@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Tabs } from 'expo-router';
 import type { BottomTabBarProps } from 'expo-router/tabs';
 import { useTranslation } from 'react-i18next';
@@ -99,24 +99,29 @@ function AdminTabBar({ state, emitter, navigateToTab, wide }: BottomTabBarProps 
 
   const items = [...PHONE_PRIMARY, 'more'];
   const moreActive = !!current && !PHONE_PRIMARY.includes(current);
+  // Same floating bar as the other workspaces (src/ui/TabBar), above the system navigation.
+  const bottom = Math.max(insets.bottom, Platform.OS === 'web' ? 0 : 8) + 8;
   return (
-    <View style={[styles.bottomBar, { backgroundColor: theme.colors.tabBar, borderTopColor: theme.colors.border, paddingBottom: Math.max(insets.bottom, 8) }]}>
-      {items.map((name) => {
-        const s = ADMIN_SECTIONS.find((x) => x.name === name);
-        const active = name === 'more' ? moreActive : current === name;
-        const icon = name === 'more' ? (active ? 'ellipsis-horizontal-circle' : 'ellipsis-horizontal-circle-outline') : active ? s!.active : s!.icon;
-        return (
-          <Pressable key={name} accessibilityRole="tab" accessibilityState={{ selected: active }} onPress={() => go(name)} style={styles.bottomItem}>
-            <View>
-              <Ionicons name={icon as never} size={24} color={active ? theme.colors.primary : theme.colors.textMuted} />
-              {name === 'messages' && unread ? <CountBadge count={unread} style={{ position: 'absolute', top: -6, right: -12 }} /> : null}
-            </View>
-            <Text variant="label" color={active ? 'primary' : 'textMuted'} numberOfLines={1}>
-              {name === 'more' ? t('common.more') : t(s!.key)}
-            </Text>
-          </Pressable>
-        );
-      })}
+    <View style={[styles.bottomWrap, { paddingBottom: bottom, paddingLeft: insets.left + 12, paddingRight: insets.right + 12, backgroundColor: theme.colors.background }]}>
+      <View accessibilityRole="tablist" style={[styles.bottomBar, { backgroundColor: theme.colors.tabBar, borderColor: theme.colors.border, borderRadius: theme.radius.xxl }, theme.shadow.raised]}>
+        {items.map((name) => {
+          const s = ADMIN_SECTIONS.find((x) => x.name === name);
+          const active = name === 'more' ? moreActive : current === name;
+          const icon = name === 'more' ? (active ? 'ellipsis-horizontal-circle' : 'ellipsis-horizontal-circle-outline') : active ? s!.active : s!.icon;
+          const label = name === 'more' ? t('common.more') : t(s!.key);
+          return (
+            <Pressable key={name} accessibilityRole="tab" accessibilityState={{ selected: active }} accessibilityLabel={label} onPress={() => go(name)} hitSlop={4} style={({ pressed }) => [styles.bottomItem, { opacity: pressed ? 0.7 : 1 }]}>
+              <View style={[styles.iconPill, active ? { backgroundColor: theme.colors.primarySoft } : null]}>
+                <Ionicons name={icon as never} size={22} color={active ? theme.colors.primary : theme.colors.textMuted} />
+                {name === 'messages' && unread ? <CountBadge count={unread} style={{ position: 'absolute', top: -5, right: 0 }} /> : null}
+              </View>
+              <Text variant="label" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} weight={active ? '800' : '600'} style={{ color: active ? theme.colors.primary : theme.colors.textMuted, fontSize: 11, letterSpacing: 0 }}>
+                {label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -126,6 +131,8 @@ const styles = StyleSheet.create({
   brand: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingBottom: 8 },
   logo: { width: 40, height: 40, borderRadius: 10 },
   sideItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, minHeight: 44 },
-  bottomBar: { flexDirection: 'row', borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 8 },
-  bottomItem: { flex: 1, alignItems: 'center', gap: 2, minHeight: 48 },
+  bottomWrap: { paddingTop: 6, alignItems: 'center' },
+  bottomBar: { flexDirection: 'row', alignItems: 'center', width: '100%', maxWidth: 620, paddingHorizontal: 6, paddingVertical: 7, borderWidth: StyleSheet.hairlineWidth },
+  bottomItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, minHeight: 50, minWidth: 0 },
+  iconPill: { width: 50, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
 });

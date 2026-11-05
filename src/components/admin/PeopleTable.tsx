@@ -70,7 +70,8 @@ export function PeopleTable({
       refreshing={refreshing}
       onRefresh={onRefresh}
       ListHeaderComponent={
-        <>
+        // Android measures FlashList headers short without an explicit width.
+        <View style={{ width: '100%' }}>
           {header}
           {wide ? (
             <View style={{ flexDirection: 'row', paddingHorizontal: theme.spacing.lg, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: theme.colors.border, gap: 12 }}>
@@ -90,7 +91,7 @@ export function PeopleTable({
               </Text>
             </View>
           ) : null}
-        </>
+        </View>
       }
       ListEmptyComponent={<EmptyState icon="people-outline" title={emptyTitle} compact />}
       renderItem={({ item }) =>

@@ -46,6 +46,7 @@ function InnerMap({
   onPinChange,
   onPress,
   onUserGesture,
+  onRegionChangeComplete,
   showsTraffic,
   onReady,
   testID,
@@ -133,6 +134,10 @@ function InnerMap({
         }}
         onDragstart={onUserGesture}
         onCameraChanged={(_e: MapCameraChangedEvent) => undefined}
+        onIdle={() => {
+          const c = map?.getCenter();
+          if (c && onRegionChangeComplete) onRegionChangeComplete({ lat: c.lat(), lng: c.lng() });
+        }}
       >
         {markers.map((m) => (
           <WebMarker key={m.id} marker={m} />

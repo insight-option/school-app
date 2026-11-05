@@ -3,7 +3,7 @@ import type { enSchools } from './en.schools';
 /** النصوص العربية لدليل المدارس وإنشاء المدرسة والقبول والخريطة. */
 export const arSchools: typeof enSchools = {
   landing: {
-    brand: 'حافلة المدرسة',
+    brand: 'ون كيو',
     heroTitle: 'اعثر على المدرسة المناسبة',
     heroSubtitle: 'تصفّح المدارس واطّلع على ما تقدّمه وقدّم طلبك إلكترونيًا – دون الحاجة إلى حساب.',
     searchPlaceholder: 'ابحث باسم المدرسة أو المدينة أو المنهج',
@@ -304,5 +304,27 @@ export const arSchools: typeof enSchools = {
     expired: 'لم يعد بالإمكان الرد على هذا التنبيه من الإشعار. سجّل الدخول للرد على السائق.',
     signIn: 'تسجيل الدخول',
     noDetails: 'افتح التطبيق لعرض التفاصيل.',
+  },
+  office: {
+    uploadCover: 'رفع صورة الغلاف',
+    deliveryStatus: { PENDING: 'في الانتظار', SENDING: 'جارٍ الإرسال…', SENT: 'تم التسليم', FAILED: 'فشل الإرسال' },
+    recipients: '{{count}} مستلم',
+    broadcastQueued: 'جارٍ إرسال الإعلان',
+    invalidTime: 'استخدم صيغة 24 ساعة HH:mm مثل 06:30',
+    noGroups: 'لا توجد مجموعات فصول أو حافلات بعد',
+    noReports: 'لا توجد رسائل مُبلّغ عنها',
+    noReportsBody: 'تظهر هنا الرسائل التي يبلّغ عنها الطلاب أو أولياء الأمور أو الموظفون.',
+    noMatches: 'لا توجد نتائج مطابقة',
+    deleteLessonTitle: 'حذف هذا الدرس؟',
+    deleteLessonBody: 'لن يرى الطلاب «{{title}}» بعد الآن.',
+    classNotFound: 'هذا الفصل لم يعد موجودًا',
+    courseNotFound: 'هذه الدورة لم تعد موجودة',
+    defaultColor: 'الافتراضي',
+    loadingStudents: 'جارٍ تحميل الطلاب…',
+    languages: { en: 'الإنجليزية', ar: 'العربية' },
+    importDone: 'اكتمل الاستيراد – القوائم محدّثة',
+    importStartFailed: 'تعذّر بدء الاستيراد',
+    broadcastFailed: 'تعذّر إرسال الإعلان',
+    members: '{{count}} عضو',
   },
 };

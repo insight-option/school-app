@@ -250,6 +250,25 @@ tilted), traffic on/off, map/satellite/hybrid, whole-route view. The next-stop c
 ETA and a call button; the bottom bar shows the distance and time left, arrival time and pickups.
 Routes refresh every 5 minutes and when the bus leaves the route for a minute.
 
+### Student ⇄ driver, live
+
+| Event | Student / parent sees | Driver sees |
+|---|---|---|
+| **Start trip** | Push "Your bus is on the way – pickup in ~N min" (own language, own ETA); the Bus tab switches to live tracking within a second (Trip/TripStop subscriptions, 30 s poll as a safety net) | Route from the live GPS fix |
+| Bus moves | Bus glides on the map, "Live" badge, ETA count-down, "N stops before you" | – |
+| **Not riding today / riding again** (`setDayStatus` mutation) | Instant toggle (optimistic) | Stop leaves / re-joins the route, route recomputed, push + toast |
+| **Switch pickup address** (header "Pickup from ▾") | Instant switch, toast | Marker moves, route recomputed, push + toast with the place name |
+| Bus within 400 m / alarm / boarded / dropped | Push (+ alarm sound for the alarm) | – |
+| **End trip** (morning) | "Arrived at school at 07:32" | – |
+
+**Saved addresses:** every student screen has a "Pickup from" switcher at the top (Snoonu-style). Addresses
+(`SavedPlace`, owner-only) are added on a map with a fixed centre pin; area, street, zone and building
+number are filled in automatically (Google Geocoding through the trips Lambda – same
+`GOOGLE_ROUTES_API_KEY`, enable the *Geocoding API* on it – with the phone's geocoder as fallback), plus a
+name (Home / Family / Work / Other) and directions for the driver. The active one is mirrored on
+`Profile.homeLocation`; `updateHomeLocation` (trips Lambda) moves today's stop on a running trip unless the
+student is already on the bus, and the first new address keeps the old home as a saved place.
+
 ## 7. Push notifications & the alarm
 
 1. `npx eas-cli init` → put the project id in `EXPO_PUBLIC_EAS_PROJECT_ID`.

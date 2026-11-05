@@ -14,7 +14,7 @@ export default function CustomerBookings() {
   const [tab, setTab] = useState<'upcoming' | 'past'>('upcoming');
   const { upcoming, past } = useMemo(() => {
     const all = bookings.data ?? [];
-    const up = all.filter(isUpcoming).sort((a, b) => (a.date + a.startTime).localeCompare(b.date + b.startTime));
+    const up = all.filter((b) => isUpcoming(b)).sort((a, b) => (a.date + a.startTime).localeCompare(b.date + b.startTime));
     return { upcoming: up, past: all.filter((b) => !up.includes(b)) };
   }, [bookings.data]);
   const rows = tab === 'upcoming' ? upcoming : past;

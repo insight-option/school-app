@@ -19,6 +19,7 @@ export default function StudentLayout() {
         <Stack.Screen name="onboarding/notifications" />
         <Stack.Screen name="classmates" />
         <Stack.Screen name="home-location" />
+        <Stack.Screen name="places" />
         <Stack.Screen name="course/[courseId]" />
       </Stack.Protected>
     </Stack>

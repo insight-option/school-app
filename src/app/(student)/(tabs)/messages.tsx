@@ -10,6 +10,7 @@ import { useMyProfile } from '../../../features/profiles';
 import { useSettings } from '../../../features/settings';
 import { useBus, useClasses } from '../../../features/school';
 import { useOpenDirectConversation, useOpenOfficeConversation } from '../../../features/messaging';
+import { StudentTopBar } from '../../../components/places/PickupSwitcher';
 
 export default function StudentMessages() {
   const { t } = useTranslation();
@@ -37,7 +38,7 @@ export default function StudentMessages() {
   );
 
   return (
-    <Screen padded={false} title={t('tabs.messages')}>
+    <Screen padded={false} topBar={<StudentTopBar />} title={t('tabs.messages')}>
       <View style={{ flex: 1 }}>
         <InboxList seatUserId={session.userId} header={header} />
       </View>

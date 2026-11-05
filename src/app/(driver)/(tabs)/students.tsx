@@ -1,14 +1,14 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { Avatar, Badge, Button, Chip, EmptyState, Input, ListItem, Screen, SkeletonList, useTheme } from '../../../ui';
 import { toast } from '../../../ui/Toast';
-import { useMyProfile, useProfilesByBus } from '../../../features/profiles';
+import { useBusProfilesSubscription, useMyProfile, useProfilesByBus } from '../../../features/profiles';
 import { useSettings } from '../../../features/settings';
 import { useActiveTrip, useTripStops } from '../../../features/trips';
-import { useBusDayStatuses } from '../../../features/dayStatus';
+import { useBusDayStatusSubscription, useBusDayStatuses } from '../../../features/dayStatus';
 import { useOpenDirectConversation } from '../../../features/messaging';
 import { todayIn } from '../../../lib/util/format';
 
@@ -27,6 +27,16 @@ export default function DriverStudents() {
   const trips = useActiveTrip(busId, today);
   const stops = useTripStops(trips.active?.id);
   const openDm = useOpenDirectConversation();
+  const [focused, setFocused] = useState(true);
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
+  // Riders cancelling or switching their pickup show up here at once.
+  useBusDayStatusSubscription(busId, today, focused);
+  useBusProfilesSubscription(busId, focused);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
 
@@ -67,7 +77,7 @@ export default function DriverStudents() {
             return (
               <ListItem
                 title={item.fullName}
-                subtitle={[item.className, item.homeAddress].filter(Boolean).join(' · ') || undefined}
+                subtitle={[item.className, item.homeLabel, item.homeAddress].filter(Boolean).join(' · ') || undefined}
                 left={<Avatar name={item.fullName} avatarKey={item.avatarKey} />}
                 right={<Badge label={st === 'going' ? t('driver.going') : st === 'notGoing' ? t('driver.notGoing') : t('driver.boarded')} tone={st === 'going' ? 'success' : st === 'notGoing' ? 'danger' : 'neutral'} size="sm" />}
                 chevron

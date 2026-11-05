@@ -1,10 +1,15 @@
 import {
   addDays,
+  bookingEndMinute,
   bookingPrice,
   dayIntervals,
   daySlots,
   fromMinutes,
+  hoursProblem,
   isOpenNow,
+  isQuarterHour,
+  lockDates,
+  minutesSince,
   msUntil,
   newBookingReference,
   newBusinessId,
@@ -55,15 +60,55 @@ describe('opening hours', () => {
     expect(toMinutes('07:30')).toBe(450);
     expect(Number.isNaN(toMinutes('7:3'))).toBe(true);
     expect(fromMinutes(1500)).toBe('01:00');
+    expect(toMinutes('24:00')).toBe(1440); // closing at midnight
+    expect(Number.isNaN(toMinutes('24:30'))).toBe(true);
+    expect(isQuarterHour('08:45')).toBe(true);
+    expect(isQuarterHour('08:10')).toBe(false);
+  });
+
+  it('rejects hours off the quarter-hour grid and overlapping ranges', () => {
+    expect(hoursProblem(parseHours({ '0': [['08:00', '12:00'], ['16:00', '02:00']] }))).toBeNull();
+    expect(hoursProblem(parseHours({ '1': [['08:10', '12:00']] }))).toMatch(/quarter/);
+    expect(hoursProblem(parseHours({ '2': [['08:00', '14:00'], ['12:00', '18:00']] }))).toMatch(/overlap/);
+    expect(hoursProblem(parseHours({ '3': [['09:00', '09:00']] }))).toMatch(/HH:mm/);
   });
 });
 
 describe('slot locks', () => {
-  it('produces one key per slot on the chosen unit and parses it back', () => {
-    const keys = slotKeys(SUNDAY, 960, 180, 60, 2);
-    expect(keys).toEqual([`${SUNDAY}#0960#2`, `${SUNDAY}#1020#2`, `${SUNDAY}#1080#2`]);
-    expect(parseSlotKey(keys[1])).toEqual({ date: SUNDAY, start: 1020, unit: 2 });
+  it('locks every quarter hour on the chosen unit and parses it back', () => {
+    const keys = slotKeys(SUNDAY, 960, 60, 2);
+    expect(keys).toEqual([`${SUNDAY}#0960#2`, `${SUNDAY}#0975#2`, `${SUNDAY}#0990#2`, `${SUNDAY}#1005#2`]);
+    expect(parseSlotKey(keys[1])).toEqual({ date: SUNDAY, start: 975, unit: 2 });
     expect(parseSlotKey('broken')).toBeNull();
+  });
+
+  it('keeps bookings on different slot grids from overlapping', () => {
+    // 18:00–19:00 booked on a 60-minute grid, later the venue switches to 30-minute slots
+    const hourBooking = new Set(slotKeys(SUNDAY, 1080, 60, 1));
+    const halfHourSlot = slotKeys(SUNDAY, 1110, 30, 1); // 18:30–19:00
+    expect(halfHourSlot.some((k) => hourBooking.has(k))).toBe(true);
+  });
+
+  it('locks overnight slots on the real calendar day', () => {
+    const monday = addDays(SUNDAY, 1);
+    // Sunday's 23:30–00:30 range slot vs a booking at Monday 00:00 from Monday's own hours
+    const overnight = slotKeys(SUNDAY, 1410, 60, 1);
+    expect(overnight).toEqual([`${SUNDAY}#1410#1`, `${SUNDAY}#1425#1`, `${monday}#0000#1`, `${monday}#0015#1`]);
+    expect(slotKeys(monday, 0, 30, 1).every((k) => overnight.includes(k))).toBe(true);
+    expect(lockDates(SUNDAY, 1410, 60)).toEqual([SUNDAY, monday]);
+    expect(lockDates(SUNDAY, 600, 120)).toEqual([SUNDAY]);
+    expect(lockDates(SUNDAY, 1380, 60)).toEqual([SUNDAY]); // ends exactly at midnight
+  });
+
+  it('knows when a booking has started and ended (overnight-aware)', () => {
+    expect(bookingEndMinute('23:00', '01:00')).toBe(1500);
+    expect(bookingEndMinute('23:00', '00:00')).toBe(1440);
+    expect(bookingEndMinute('18:00', '19:30')).toBe(1170);
+    const monday = addDays(SUNDAY, 1);
+    // Monday 00:30 – a Sunday 23:00–01:00 booking is still running
+    expect(minutesSince(SUNDAY, 1500, { date: monday, minutes: 30 })).toBe(-30);
+    expect(minutesSince(SUNDAY, 1380, { date: monday, minutes: 30 })).toBe(90);
+    expect(minutesSince(monday, 600, { date: SUNDAY, minutes: 600 })).toBe(-1440);
   });
 });
 

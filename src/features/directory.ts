@@ -20,7 +20,9 @@ export function useDirectorySchools() {
     gcTime: 7 * 24 * 3600_000,
     queryFn: async (): Promise<School[]> => {
       const c = clientFor(signedIn);
-      return listAll((nextToken) => c.models.School.listDirectorySchools({ directory: DIRECTORY_PUBLIC }, { limit: 100, nextToken }), 50);
+      const rows = await listAll((nextToken) => c.models.School.listDirectorySchools({ directory: DIRECTORY_PUBLIC }, { limit: 100, nextToken }), 50);
+      // Schools paused by the platform owner stay out of the public directory.
+      return rows.filter((s) => s.status !== 'SUSPENDED');
     },
   });
 }

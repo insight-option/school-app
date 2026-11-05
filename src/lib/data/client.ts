@@ -21,6 +21,7 @@ export type BusLocation = Schema['BusLocation']['type'];
 export type StudentDayStatus = Schema['StudentDayStatus']['type'];
 export type Trip = Schema['Trip']['type'];
 export type TripStop = Schema['TripStop']['type'];
+export type SavedPlace = Schema['SavedPlace']['type'];
 export type Conversation = Schema['Conversation']['type'];
 export type ConversationMember = Schema['ConversationMember']['type'];
 export type Message = Schema['Message']['type'];

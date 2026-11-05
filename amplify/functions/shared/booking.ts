@@ -12,14 +12,26 @@ export type PriceMode = 'PER_HOUR' | 'PER_SESSION' | 'PER_PERSON' | 'ON_REQUEST'
 export const QATAR_UTC_OFFSET_MINUTES = 180; // Asia/Qatar, no daylight saving
 export const DEFAULT_SLOT_MINUTES = 60;
 export const WEEKDAYS = ['0', '1', '2', '3', '4', '5', '6'] as const;
+/**
+ * Slot locks are written per quarter hour of real (wall-clock) time, independent of the venue's
+ * slot length: changing the slot grid or the opening hours later can never let two bookings of
+ * the same court overlap. Opening hours and slot lengths are therefore kept on the 15-minute grid.
+ */
+export const LOCK_MINUTES = 15;
 
-const HHMM = /^([01]\d|2[0-4]):([0-5]\d)$/;
+const HHMM = /^(?:([01]\d|2[0-3]):([0-5]\d)|(24):(00))$/;
 
 export function toMinutes(hhmm: string): number {
-  const m = HHMM.exec(hhmm.trim());
+  const m = HHMM.exec((hhmm ?? '').trim());
   if (!m) return NaN;
-  return Number(m[1]) * 60 + Number(m[2]);
+  return m[3] ? 1440 : Number(m[1]) * 60 + Number(m[2]);
 }
+
+/** "HH:mm" on the quarter-hour grid (what the hours editor offers). */
+export const isQuarterHour = (hhmm: string) => {
+  const m = toMinutes(hhmm);
+  return !isNaN(m) && m % LOCK_MINUTES === 0;
+};
 
 /** Minutes after midnight → "HH:mm" (wraps after 24:00, e.g. 1500 → "01:00"). */
 export function fromMinutes(total: number): string {
@@ -68,6 +80,21 @@ export function dayIntervals(hours: OpeningHours, date: string): { start: number
     .sort((x, y) => x.start - y.start);
 }
 
+const A_SUNDAY = '2026-11-01'; // any Sunday – dayIntervals() works on dates
+
+/** Why opening hours cannot be saved (null = fine): HH:mm on the quarter-hour grid, no overlapping ranges in a day. */
+export function hoursProblem(hours: OpeningHours): string | null {
+  for (const day of WEEKDAYS) {
+    for (const [a, b] of hours[day] ?? []) {
+      if (isNaN(toMinutes(a)) || isNaN(toMinutes(b)) || a === b) return 'Opening hours must be HH:mm – HH:mm';
+      if (!isQuarterHour(a) || !isQuarterHour(b)) return 'Opening hours must be on the quarter hour (:00, :15, :30, :45)';
+    }
+    const ivs = dayIntervals(hours, addDays(A_SUNDAY, Number(day)));
+    for (let i = 1; i < ivs.length; i++) if (ivs[i].start < ivs[i - 1].end) return 'Opening hours of one day must not overlap';
+  }
+  return null;
+}
+
 /** Bookable slot starts of a day. */
 export function daySlots(hours: OpeningHours, date: string, slotMinutes: number): { start: number; end: number }[] {
   const step = slotMinutes > 0 ? slotMinutes : DEFAULT_SLOT_MINUTES;
@@ -84,11 +111,25 @@ export function windowIsOpen(hours: OpeningHours, date: string, start: number, d
   return dayIntervals(hours, date).some((iv) => start >= iv.start && start + duration <= iv.end && (start - iv.start) % slotMinutes === 0);
 }
 
-/** Slot-lock keys a booking occupies: date#HH:mm#unit per slot (overnight slots keep the booking date). */
-export function slotKeys(date: string, start: number, duration: number, slotMinutes: number, unit: number): string[] {
+/**
+ * Lock keys a booking occupies on one unit: `date#mmmm#unit` for every quarter hour, where date and
+ * minute are the real calendar time (an overnight slot at 01:00 of Sunday's hours locks Monday 0060),
+ * so overlapping hours of two days still share the same locks.
+ */
+export function slotKeys(date: string, start: number, duration: number, unit: number): string[] {
   const keys: string[] = [];
-  for (let t = start; t < start + duration; t += slotMinutes) keys.push(`${date}#${String(t).padStart(4, '0')}#${unit}`);
+  for (let t = start; t < start + duration; t += LOCK_MINUTES) {
+    const day = Math.floor(t / 1440);
+    const minute = t - day * 1440;
+    keys.push(`${day ? addDays(date, day) : date}#${String(minute).padStart(4, '0')}#${unit}`);
+  }
   return keys;
+}
+
+/** Calendar dates whose lock rows a booking window touches (the booking date, plus the next day when it runs past midnight). */
+export function lockDates(date: string, start: number, duration: number): string[] {
+  const last = Math.floor((start + Math.max(duration, 1) - 1) / 1440);
+  return Array.from({ length: last + 1 }, (_, i) => (i ? addDays(date, i) : date));
 }
 
 /** Parses a slot key back into its start minute and unit. */
@@ -125,6 +166,19 @@ export function addDays(date: string, days: number): string {
   const d = new Date(`${date}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+/** Minutes from a booking-day minute (may exceed 1440 for overnight slots) to `now` – negative before, ≥ 0 after. */
+export function minutesSince(date: string, minute: number, now: { date: string; minutes: number }): number {
+  const days = Math.round((Date.parse(`${now.date}T00:00:00Z`) - Date.parse(`${date}T00:00:00Z`)) / 86_400_000);
+  return days * 1440 + now.minutes - minute;
+}
+
+/** End minute of a booking on its booking day (overnight bookings end after 1440). */
+export function bookingEndMinute(startTime: string, endTime: string): number {
+  const s = toMinutes(startTime);
+  const e = toMinutes(endTime);
+  return e <= s ? e + 1440 : e;
 }
 
 /** Milliseconds until a booking starts (Qatar time). */

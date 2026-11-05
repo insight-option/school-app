@@ -1,4 +1,5 @@
-import { QueryClient } from '@tanstack/react-query';
+import { AppState, Platform } from 'react-native';
+import { QueryClient, focusManager } from '@tanstack/react-query';
 import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persister';
 import { KV_KEYS, storage } from '../storage/mmkv';
 
@@ -23,6 +24,15 @@ export const queryClient = new QueryClient({
     },
   },
 });
+
+// Native: coming back to the app counts as "window focus", so live screens (bus position, trip, chats)
+// refetch at once instead of showing what was cached when the phone went to sleep.
+if (Platform.OS !== 'web') {
+  focusManager.setEventListener((handleFocus) => {
+    const sub = AppState.addEventListener('change', (state) => handleFocus(state === 'active'));
+    return () => sub.remove();
+  });
+}
 
 export const queryPersister = createSyncStoragePersister({
   storage: {
@@ -75,5 +85,7 @@ export const qk = {
   importJob: (id: string) => ['importJob', id] as const,
   reports: (schoolId: string) => ['reports', schoolId] as const,
   devices: (userId: string) => ['devices', userId] as const,
+  places: (userId: string) => ['places', userId] as const,
+  geocode: (lat: number, lng: number, lang: string) => ['geocode', lat.toFixed(4), lng.toFixed(4), lang] as const,
   groupConversations: () => ['conversations', 'groups'] as const,
 };

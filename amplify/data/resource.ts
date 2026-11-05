@@ -51,7 +51,7 @@ const schema = a
     FeedbackCategory: a.enum(['ACADEMIC', 'BEHAVIOR', 'ATTENDANCE', 'PRAISE', 'OTHER']),
     AuthorRole: a.enum(['TEACHER', 'ADMIN']),
     BroadcastAudience: a.enum(['ALL_TEACHERS', 'ALL_STUDENTS', 'ALL_DRIVERS', 'CLASS', 'BUS']),
-    NotificationType: a.enum(['ALARM', 'MESSAGE', 'FEEDBACK', 'BROADCAST', 'BUS_NEAR', 'BOARDED', 'DROPPED', 'SYSTEM', 'APPLICATION', 'BOOKING']),
+    NotificationType: a.enum(['ALARM', 'MESSAGE', 'FEEDBACK', 'BROADCAST', 'BUS_NEAR', 'BOARDED', 'DROPPED', 'SYSTEM', 'APPLICATION', 'BOOKING', 'TRIP']),
     ImportJobStatus: a.enum(['PENDING', 'RUNNING', 'COMPLETED', 'FAILED']),
     GenderPolicy: a.enum(['MIXED', 'BOYS', 'GIRLS']),
     ApplicationStatus: a.enum(['NEW', 'REVIEWING', 'ACCEPTED', 'WAITLISTED', 'REJECTED']),
@@ -105,7 +105,7 @@ const schema = a
       })
       .identifier(['schoolId'])
       .secondaryIndexes((index) => [index('directory').sortKeys(['nameLower']).queryField('listDirectorySchools')])
-      .authorization((allow) => [allow.group('OWNER'), allow.guest().to(['read']), allow.authenticated().to(['read']), allow.groupDefinedIn('schoolId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.guest().to(['read']), allow.authenticated().to(['read']), allow.groupDefinedIn('schoolId').to(['read'])]),
 
     /** Online admission applications – submitted without an account, reviewed by the school office. */
     Application: a
@@ -147,7 +147,7 @@ const schema = a
         primaryColor: a.string(),
         address: a.string(),
         schoolLocation: a.ref('Location'),
-        timezone: a.string().default('Asia/Riyadh'),
+        timezone: a.string().default('Asia/Qatar'),
         defaultLanguage: a.string().default('en'),
         morningTripStart: a.string().default('06:30'),
         afternoonTripStart: a.string().default('13:30'),
@@ -175,8 +175,11 @@ const schema = a
         busName: a.string(),
         parentEmail: a.string(),
         parentPhone: a.string(),
-        homeLocation: a.ref('Location'),
+        homeLocation: a.ref('Location'), // the active pickup / drop-off point (one of the saved places)
         homeAddress: a.string(),
+        homePlaceId: a.string(), // SavedPlace currently used for pickup
+        homeLabel: a.string(), // its name ("Home", "Grandparents", …) – shown to the driver
+        homeNote: a.string(), // directions for the driver (gate colour, building, …)
         isActive: a.boolean().default(true),
         language: a.string().default('en'),
         grade: a.string(),
@@ -283,6 +286,30 @@ const schema = a
         allow.ownerDefinedIn('schoolId').identityClaim('custom:schoolId').to(['read']),
         allow.groupDefinedIn('schoolId'),
       ]),
+    /**
+     * Addresses a user saved ("Home", "Grandparents", …). The active one is mirrored on
+     * Profile.homeLocation by the updateHomeLocation mutation, which also moves today's pickup on an
+     * active trip and re-routes the bus. Owners create, rename and delete their places directly.
+     */
+    SavedPlace: a
+      .model({
+        ownerId: a.string().required(), // = userId (Cognito sub)
+        schoolId: a.string(),
+        label: a.string().required(),
+        kind: a.string().required(), // HOME | FAMILY | WORK | OTHER
+        lat: a.float().required(),
+        lng: a.float().required(),
+        address: a.string(),
+        area: a.string(),
+        city: a.string(),
+        street: a.string(),
+        zone: a.string(),
+        building: a.string(),
+        note: a.string(),
+        lastUsedAt: a.datetime().required(),
+      })
+      .secondaryIndexes((index) => [index('ownerId').sortKeys(['lastUsedAt']).queryField('listPlacesByOwner')])
+      .authorization((allow) => [allow.group('OWNER'), allow.ownerDefinedIn('ownerId'), allow.groupDefinedIn('schoolId')]),
     Trip: a
       .model({
         busId: a.string().required(),
@@ -318,6 +345,8 @@ const schema = a
         parentPhone: a.string(),
         homeAddress: a.string(),
         location: a.ref('Location'),
+        pickupLabel: a.string(), // name of the saved place the student is picked up from today
+        pickupNote: a.string(), // directions for the driver
         order: a.integer().required(),
         status: a.ref('StopStatus').required(),
         etaSeconds: a.integer(),
@@ -634,7 +663,7 @@ const schema = a
       })
       .identifier(['businessId'])
       .secondaryIndexes((index) => [index('directory').sortKeys(['nameLower']).queryField('listDirectoryBusinesses')])
-      .authorization((allow) => [allow.group('OWNER'), allow.guest().to(['read']), allow.authenticated().to(['read']), allow.groupDefinedIn('businessId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.guest().to(['read']), allow.authenticated().to(['read']), allow.groupDefinedIn('businessId').to(['read'])]),
 
     /** A bookable place of a business (one pitch type / court set) with hours and pricing. */
     Venue: a
@@ -682,7 +711,7 @@ const schema = a
         index('categoryId').sortKeys(['nameLower']).queryField('listVenuesByCategory'),
         index('businessId').sortKeys(['nameLower']).queryField('listVenuesByBusiness'),
       ])
-      .authorization((allow) => [allow.group('OWNER'), allow.guest().to(['read']), allow.authenticated().to(['read']), allow.groupDefinedIn('businessId')]),
+      .authorization((allow) => [allow.group('OWNER'), allow.guest().to(['read']), allow.authenticated().to(['read']), allow.groupDefinedIn('businessId').to(['read'])]),
 
     /** Slot lock (venueId + date#HH:mm#unit) – written only by the booking Lambda; prevents double booking. */
     VenueSlot: a
@@ -839,6 +868,17 @@ const schema = a
     }),
     PlacesResult: a.customType({
       places: a.ref('PlaceResult').array(),
+    }),
+    /** Reverse-geocoded address parts (Qatar: area, street, zone, building number). */
+    GeocodeResult: a.customType({
+      formatted: a.string(),
+      title: a.string(),
+      area: a.string(),
+      city: a.string(),
+      street: a.string(),
+      zone: a.string(),
+      building: a.string(),
+      country: a.string(),
     }),
     SchoolAccessResult: a.customType({
       schoolId: a.string(),
@@ -1242,8 +1282,50 @@ const schema = a
 
     searchPlaces: a
       .query()
-      .arguments({ query: a.string().required(), lat: a.float(), lng: a.float() })
+      .arguments({ query: a.string().required(), lat: a.float(), lng: a.float(), language: a.string() })
       .returns(a.ref('PlacesResult'))
+      .authorization((allow) => [allow.authenticated()])
+      .handler(a.handler.function(trips)),
+
+    /** "Not going today" / "I'm going again" – also updates a running trip (stop, route, driver). */
+    setDayStatus: a
+      .mutation()
+      .arguments({ date: a.string().required(), status: a.ref('DayStatus').required(), note: a.string(), untilDate: a.string() })
+      .returns(a.ref('StudentDayStatus').array())
+      .authorization((allow) => [allow.authenticated()])
+      .handler(a.handler.function(trips)),
+
+    reverseGeocode: a
+      .query()
+      .arguments({ lat: a.float().required(), lng: a.float().required(), language: a.string() })
+      .returns(a.ref('GeocodeResult'))
+      .authorization((allow) => [allow.authenticated()])
+      .handler(a.handler.function(trips)),
+
+    /**
+     * Sets the pickup point: an existing saved place (placeId), a new one (newPlace + details) or
+     * plain coordinates (onboarding, school office, older apps). Moves today's stop on an active trip,
+     * re-routes the bus and tells the driver.
+     */
+    updateHomeLocation: a
+      .mutation()
+      .arguments({
+        lat: a.float().required(),
+        lng: a.float().required(),
+        address: a.string(),
+        userId: a.string(),
+        placeId: a.string(),
+        newPlace: a.boolean(),
+        label: a.string(),
+        kind: a.string(),
+        note: a.string(),
+        area: a.string(),
+        city: a.string(),
+        street: a.string(),
+        zone: a.string(),
+        building: a.string(),
+      })
+      .returns(a.ref('Profile'))
       .authorization((allow) => [allow.authenticated()])
       .handler(a.handler.function(trips)),
 
@@ -1365,13 +1447,6 @@ const schema = a
     updateMyProfile: a
       .mutation()
       .arguments({ avatarKey: a.string(), language: a.string(), phone: a.string(), parentPhone: a.string() })
-      .returns(a.ref('Profile'))
-      .authorization((allow) => [allow.authenticated()])
-      .handler(a.handler.function(comms)),
-
-    updateHomeLocation: a
-      .mutation()
-      .arguments({ lat: a.float().required(), lng: a.float().required(), address: a.string(), userId: a.string() })
       .returns(a.ref('Profile'))
       .authorization((allow) => [allow.authenticated()])
       .handler(a.handler.function(comms)),

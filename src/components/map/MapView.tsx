@@ -31,6 +31,8 @@ export const MapView = forwardRef<MapHandle, MapProps>(function MapView(
     onPinChange,
     onPress,
     onUserGesture,
+    onRegionChangeComplete,
+    hidePoi,
     showsUserLocation,
     showsTraffic,
     onReady,
@@ -55,6 +57,19 @@ export const MapView = forwardRef<MapHandle, MapProps>(function MapView(
       },
       fitTo: (points, pad = 60) => {
         if (!points.length) return;
+        if (Platform.OS === 'android') {
+          // fitToCoordinates is a no-op on Android here (new architecture + mapPadding): frame the
+          // points with an explicit region instead; mapPadding still keeps them clear of overlays.
+          const lats = points.map((p) => p.lat);
+          const lngs = points.map((p) => p.lng);
+          const [minLat, maxLat, minLng, maxLng] = [Math.min(...lats), Math.max(...lats), Math.min(...lngs), Math.max(...lngs)];
+          const margin = 1 + Math.min(1.2, pad / 100);
+          mapRef.current?.animateToRegion(
+            { latitude: (minLat + maxLat) / 2, longitude: (minLng + maxLng) / 2, latitudeDelta: Math.max(0.004, (maxLat - minLat) * margin), longitudeDelta: Math.max(0.004, (maxLng - minLng) * margin) },
+            600,
+          );
+          return;
+        }
         mapRef.current?.fitToCoordinates(
           points.map((p) => ({ latitude: p.lat, longitude: p.lng })),
           { edgePadding: { top: pad + (padding?.top ?? 0), right: pad, bottom: pad + (padding?.bottom ?? 0), left: pad }, animated: true },
@@ -102,12 +117,13 @@ export const MapView = forwardRef<MapHandle, MapProps>(function MapView(
         showsTraffic={showsTraffic}
         showsBuildings
         showsCompass={false}
-        showsPointsOfInterests={!themed}
+        showsPointsOfInterests={!themed && !hidePoi}
         toolbarEnabled={false}
         pitchEnabled
         rotateEnabled
         onPress={handlePress}
         onPanDrag={onUserGesture}
+        onRegionChangeComplete={onRegionChangeComplete ? (r) => onRegionChangeComplete({ lat: r.latitude, lng: r.longitude }) : undefined}
         onMapReady={onReady}
         mapPadding={padding ? { top: padding.top ?? 0, right: padding.right ?? 0, bottom: padding.bottom ?? 0, left: padding.left ?? 0 } : undefined}
       >

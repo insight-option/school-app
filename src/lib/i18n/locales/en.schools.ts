@@ -1,7 +1,7 @@
 /** Strings for the public school directory, school sign-up, admissions and the premium driver map. */
 export const enSchools = {
   landing: {
-    brand: 'School Bus',
+    brand: 'OneQ',
     heroTitle: 'Find the right school',
     heroSubtitle: 'Browse schools, see what they offer and apply online – no account needed.',
     searchPlaceholder: 'Search by school, city or curriculum',
@@ -302,5 +302,27 @@ export const enSchools = {
     expired: 'This alarm can no longer be answered from the notification. Sign in to reply to the driver.',
     signIn: 'Sign in',
     noDetails: 'Open the app to see the details.',
+  },
+  office: {
+    uploadCover: 'Upload cover',
+    deliveryStatus: { PENDING: 'Queued', SENDING: 'Sending…', SENT: 'Delivered', FAILED: 'Failed' },
+    recipients: '{{count}} recipients',
+    broadcastQueued: 'Broadcast is on its way',
+    invalidTime: 'Use the 24-hour format HH:mm, e.g. 06:30',
+    noGroups: 'No class or bus groups yet',
+    noReports: 'No reported messages',
+    noReportsBody: 'Messages reported by students, parents or staff appear here.',
+    noMatches: 'Nobody matches your search',
+    deleteLessonTitle: 'Delete this lesson?',
+    deleteLessonBody: 'Students will no longer see “{{title}}”.',
+    classNotFound: 'This class no longer exists',
+    courseNotFound: 'This course no longer exists',
+    defaultColor: 'Default',
+    loadingStudents: 'Loading students…',
+    languages: { en: 'English', ar: 'Arabic' },
+    importDone: 'Import finished – lists are up to date',
+    importStartFailed: 'The import could not be started',
+    broadcastFailed: 'The broadcast could not be sent',
+    members: '{{count}} members',
   },
 };

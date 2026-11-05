@@ -8,6 +8,7 @@ import { useSession } from '../../../lib/auth/session';
 import { useFeedbackForStudent } from '../../../features/engagement';
 import { relativeDay } from '../../../lib/util/format';
 import type { Feedback } from '../../../lib/data/client';
+import { StudentTopBar } from '../../../components/places/PickupSwitcher';
 
 type Row = { kind: 'day'; id: string; label: string } | { kind: 'item'; id: string; item: Feedback };
 
@@ -31,7 +32,7 @@ export default function StudentFeedback() {
   }, [q.data, t]);
 
   return (
-    <Screen padded={false} title={t('tabs.feedback')}>
+    <Screen padded={false} topBar={<StudentTopBar />} title={t('tabs.feedback')}>
       {q.isLoading && !q.data ? (
         <View style={{ padding: theme.spacing.lg, gap: theme.spacing.md }}>
           <SkeletonCard />
