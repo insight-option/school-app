@@ -31,6 +31,7 @@ export const enOwner = {
       gmv30: 'Bookings value',
       commission30: 'Commission',
       last30: 'Last 30 days',
+      days30: '30 days',
       schools: 'Schools',
       businesses: 'Businesses',
       venues: 'Venues',

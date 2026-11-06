@@ -32,6 +32,7 @@ export const arOwner: typeof enOwner = {
       gmv30: 'قيمة الحجوزات',
       commission30: 'العمولة',
       last30: 'آخر 30 يومًا',
+      days30: '30 يومًا',
       schools: 'المدارس',
       businesses: 'الأنشطة التجارية',
       venues: 'الأماكن',

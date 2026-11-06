@@ -211,7 +211,7 @@ function RootNavigator() {
         <Stack.Screen name="onboarding/business" />
       </Stack.Protected>
       <Stack.Protected guard={signedIn && role === 'OWNER'}>
-        <Stack.Screen name="(owner)" />
+        <Stack.Screen name="owner" />
       </Stack.Protected>
       <Stack.Protected guard={signedIn && role === 'PARTNER'}>
         <Stack.Screen name="(partner)" />

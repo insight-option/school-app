@@ -4,6 +4,7 @@ import { HandlerError, isIamCaller, opName, requireIdentity, type AppSyncEvent }
 import { deleteVenue, registerBusiness, registerCustomer, saveBusinessProfile, saveVenue } from './business';
 import { cancelBooking, createBooking, respondBooking, venueAvailability } from './bookings';
 import { ownerDeleteTenant, ownerListUsers, ownerOverview, ownerSetTenantStatus, ownerUserAction } from './owner';
+import { signInName } from './signin';
 
 // Populated by Amplify (USER_POOL_ID from backend.ts); typed here like the other functions.
 const env = process.env as unknown as DataEnv & { USER_POOL_ID: string };
@@ -15,6 +16,8 @@ export const handler = async (event: AppSyncEvent<Args>) => {
   const op = opName(event);
   const args = event.arguments as never;
   try {
+    // Sign-in helper: Cognito only, answered before the data client is set up (it runs on the sign-in screen).
+    if (op === 'signInName') return await signInName({ cognito, userPoolId: env.USER_POOL_ID }, args);
     const client = await getDataClient(env);
     // Guest-callable (identity pool) operations first.
     if (op === 'venueAvailability') return await venueAvailability(client, args);

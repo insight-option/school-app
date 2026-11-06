@@ -45,7 +45,7 @@ export default function OwnerInvoice() {
   if (id && !existing) {
     return (
       <Screen back title=" " maxWidth={820}>
-        <EmptyState icon="receipt-outline" title={t('owner.invoice.notFound')} actionLabel={t('common.back')} onAction={() => (router.canGoBack() ? router.back() : router.replace('/(owner)/billing' as never))} />
+        <EmptyState icon="receipt-outline" title={t('owner.invoice.notFound')} actionLabel={t('common.back')} onAction={() => (router.canGoBack() ? router.back() : router.replace('/owner/billing' as never))} />
       </Screen>
     );
   }
@@ -151,7 +151,7 @@ function InvoiceForm({ initial, defaultTenant, existingNumbers }: { initial: Inv
         onSuccess: () => {
           toast.success(t('owner.invoice.saved'));
           if (router.canGoBack()) router.back();
-          else router.replace('/(owner)/billing' as never);
+          else router.replace('/owner/billing' as never);
         },
         onError: (err) => toast.error(err.message),
       },

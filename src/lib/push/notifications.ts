@@ -171,8 +171,8 @@ export function routeForPush(data: PushData | undefined, role: string | null): s
     case 'TRIP':
       return role === 'STUDENT' ? '/(student)/bus' : role === 'DRIVER' ? '/(driver)/trip' : '/notifications';
     case 'BOOKING':
-      if (!data.bookingId) return role === 'OWNER' ? '/(owner)/bookings' : '/notifications';
-      return role === 'PARTNER' ? `/(partner)/bookings/${data.bookingId}` : role === 'CUSTOMER' ? `/(customer)/booking/${data.bookingId}` : role === 'OWNER' ? '/(owner)/bookings' : '/notifications';
+      if (!data.bookingId) return role === 'OWNER' ? '/owner/bookings' : '/notifications';
+      return role === 'PARTNER' ? `/(partner)/bookings/${data.bookingId}` : role === 'CUSTOMER' ? `/(customer)/booking/${data.bookingId}` : role === 'OWNER' ? '/owner/bookings' : '/notifications';
     case 'APPLICATION':
       return role === 'ADMIN' ? (data.applicationId ? `/(admin)/applications/${data.applicationId}` : '/(admin)/applications') : '/notifications';
     case 'BROADCAST':

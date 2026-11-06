@@ -85,7 +85,7 @@ export default function OwnerTenantDetail() {
   if (!record) {
     return (
       <Screen back title=" " maxWidth={900}>
-        <EmptyState icon="business-outline" title={t('owner.tenant.notFound')} actionLabel={t('common.back')} onAction={() => (router.canGoBack() ? router.back() : router.replace('/(owner)/tenants' as never))} />
+        <EmptyState icon="business-outline" title={t('owner.tenant.notFound')} actionLabel={t('common.back')} onAction={() => (router.canGoBack() ? router.back() : router.replace('/owner/tenants' as never))} />
       </Screen>
     );
   }
@@ -109,7 +109,7 @@ export default function OwnerTenantDetail() {
         onSuccess: () => {
           toast.success(t('owner.tenant.deleted'));
           setDeleteOpen(false);
-          router.replace('/(owner)/tenants' as never);
+          router.replace('/owner/tenants' as never);
         },
         onError: (e) => toast.error(e.message),
       },
@@ -189,7 +189,7 @@ export default function OwnerTenantDetail() {
         <SectionHeader
           title={t('owner.tenant.invoices')}
           action={t('owner.tenant.newInvoice')}
-          onAction={() => router.push({ pathname: '/(owner)/billing/invoice', params: { tenantId, type } } as never)}
+          onAction={() => router.push({ pathname: '/owner/billing/invoice', params: { tenantId, type } } as never)}
         />
         <Card padding={0}>
           {invoices.isLoading ? (
@@ -204,7 +204,7 @@ export default function OwnerTenantDetail() {
                 subtitle={inv.status === 'PAID' && inv.paidAt ? t('owner.billing.paidOn', { date: formatDate(inv.paidAt) }) : inv.dueDate ? t('owner.billing.due', { date: formatDate(inv.dueDate) }) : t('owner.billing.issued', { date: formatDate(inv.issueDate) })}
                 right={<Badge label={t(`owner.invoiceStatus.${inv.status}`)} tone={INVOICE_TONE[inv.status] ?? 'neutral'} size="sm" />}
                 chevron
-                onPress={() => router.push({ pathname: '/(owner)/billing/invoice', params: { id: inv.id } } as never)}
+                onPress={() => router.push({ pathname: '/owner/billing/invoice', params: { id: inv.id } } as never)}
                 style={i === arr.length - 1 ? { borderBottomWidth: 0 } : undefined}
               />
             ))

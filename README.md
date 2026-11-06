@@ -58,9 +58,17 @@ school-app/
 | **Customer** | Explore → book → "Create account" (e-mail code) | Explore, My bookings (cancel, book again), account |
 | Schools | unchanged (§0) | School office, teacher, driver, parent/student |
 
-**Create the owner account (once):** Cognito console → user pool of the hosting backend (`amplify_outputs.json` → `auth.user_pool_id`) →
-**Create user** (your e-mail as user name, e-mail verified, a password) → open the user → **Add user to group** → **OWNER**
-(the group is created by the backend). Sign in with that e-mail and password – the app opens the owner console. First steps there:
+**Create the owner account (once):** easiest from a terminal with AWS access –
+`AWS_PROFILE=school OWNER_EMAIL=you@example.com OWNER_NAME="Your Name" npm run create-owner`. It uses the user pool in
+`amplify_outputs.json` (the hosting backend – or your sandbox while `npx ampx sandbox` is running, which rewrites that file),
+makes the e-mail the user name, adds the account to **OWNER** and lets Cognito e-mail a temporary password (or set
+`OWNER_PASSWORD` for a permanent one). By hand: Cognito console → **the pool named in `amplify_outputs.json` →
+`auth.user_pool_id`** (production: the pool of the `amplify-dg9g67lujh0do-main-…` stack; sandbox pools are tagged
+`amplify:deployment-type = sandbox`) → **Create user** (e-mail verified, a temporary password) → **Add user to group** →
+**OWNER**. Owners can sign in with the user name *or* the e-mail address (the app resolves the e-mail of owner and staff
+accounts – never students or drivers – through the guest `signInName` query); a temporary password leads to "Set your new
+password" first. The owner console lives under `/owner/…` (own URLs, so web reloads and links never land in another workspace).
+First steps there:
 **Categories → Add the defaults**, **Billing → Plans** (e.g. a school plan and a business plan with a trial), **Branding** (name, logo, icon, colours).
 
 **Bookings:** the platform Lambda checks opening hours, slot grid, duration and advance window, then locks every slot of the

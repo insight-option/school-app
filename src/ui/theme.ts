@@ -273,6 +273,12 @@ export function shade(hex: string, percent: number): string {
   return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
 }
 
+/** Brand gradient for hero headers – deeper in dark mode, where the primary colour is lighter. */
+export function heroStops(theme: Pick<Theme, 'scheme' | 'colors'>): string[] {
+  const p = theme.colors.primary;
+  return theme.scheme === 'dark' ? [shade(p, -50), shade(p, -18), p] : [shade(p, -22), p, shade(p, 8)];
+}
+
 export function withAlpha(hex: string, alpha: number): string {
   if (!isHex(hex)) return hex;
   const n = parseInt(hex.slice(1), 16);

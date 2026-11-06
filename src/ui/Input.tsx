@@ -1,5 +1,5 @@
 import React, { forwardRef, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View, type TextInputInstance, type TextInputProps, type StyleProp, type ViewStyle } from 'react-native';
+import { Platform, Pressable, StyleSheet, TextInput, View, type TextInputInstance, type TextInputProps, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { useTheme } from './theme';
@@ -61,7 +61,7 @@ export const Input = forwardRef<TextInputInstance, InputProps>(function Input(
             rest.onBlur?.(e);
           }}
           {...rest}
-          style={[styles.input, { color: colors.text, fontFamily: theme.fonts.medium, textAlign: rest.textAlign ?? undefined }, style]}
+          style={[styles.input, { color: colors.text, fontFamily: theme.fonts.medium, textAlign: rest.textAlign ?? undefined }, WEB_NO_OUTLINE, style]}
         />
         {secureTextEntry ? (
           <Pressable accessibilityRole="button" accessibilityLabel={hidden ? 'Show password' : 'Hide password'} onPress={() => setHidden((h) => !h)} hitSlop={8}>
@@ -85,6 +85,9 @@ export const Input = forwardRef<TextInputInstance, InputProps>(function Input(
     </View>
   );
 });
+
+// the field draws its own focus ring; the browser's default outline would sit inside it
+const WEB_NO_OUTLINE = Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null;
 
 const styles = StyleSheet.create({
   field: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, paddingHorizontal: 12 },

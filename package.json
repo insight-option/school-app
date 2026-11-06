@@ -15,6 +15,7 @@
     "sandbox:once": "ampx sandbox --once",
     "seed": "tsx scripts/seed.ts",
     "create-admin": "tsx scripts/create-admin.ts",
+    "create-owner": "tsx scripts/create-owner.ts",
     "create-bus": "tsx scripts/create-bus.ts",
     "smoke": "tsx scripts/smoke.ts",
     "wipe": "tsx scripts/wipe.ts",

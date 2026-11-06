@@ -1012,6 +1012,14 @@ const schema = a
       .authorization((allow) => [allow.guest(), allow.authenticated()])
       .handler(a.handler.function(platform)),
 
+    /** Sign-in with e-mail for owner/staff accounts whose username is not their e-mail (platform/signin.ts). */
+    signInName: a
+      .query()
+      .arguments({ email: a.string().required() })
+      .returns(a.string())
+      .authorization((allow) => [allow.guest(), allow.authenticated()])
+      .handler(a.handler.function(platform)),
+
     bookVenue: a
       .mutation()
       .arguments({

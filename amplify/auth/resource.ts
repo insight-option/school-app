@@ -27,18 +27,19 @@ export const auth = defineAuth({
         `Your ${appName} verification code is ${createCode()}. Enter it in the app to finish creating your school account. It expires in 24 hours.`,
       userInvitation: {
         emailSubject: `Your ${appName} account`,
+        // Also sent for accounts created in the Cognito console (the platform owner), so it is role-neutral.
         emailBody: (user, code) =>
           [
-            `Your school created an account for you in the ${appName} app.`,
+            `An account was created for you in the ${appName} app.`,
             '',
-            `Install the "${appName}" app from the App Store / Google Play (or open the web app link your school shared), then sign in with:`,
+            `Install the "${appName}" app from the App Store / Google Play (or open the web app link you were given), then sign in with:`,
             '',
-            `  School ID (username): ${user()}`,
-            `  Temporary password:   ${code()}`,
+            `  Username / ID:      ${user()}`,
+            `  Temporary password: ${code()}`,
             '',
-            'You will be asked to set a new password on first login. Parents and the student share this login.',
+            'You will be asked to choose a new password on first sign-in. For school accounts, parents and the student share this login.',
             '',
-            'If you did not expect this e-mail, contact the school office.',
+            'If you did not expect this e-mail, you can ignore it.',
           ].join('\n'),
       },
     },

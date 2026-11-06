@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
-import { View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { type TextInputInstance } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
-import { Button, Input, Screen, Text, useTheme } from '../../ui';
+import { Button, Input } from '../../ui';
+import { toast } from '../../ui/Toast';
+import { AuthShell, IdentityChip, PasswordRules } from '../../components/auth/AuthShell';
 import { authErrorKey, completeNewPassword, useSessionStore } from '../../lib/auth/session';
 import { passwordProblem } from '../../lib/validation';
 
@@ -10,8 +12,8 @@ import { passwordProblem } from '../../lib/validation';
 export default function NewPasswordScreen() {
   const { t } = useTranslation();
   const router = useRouter();
-  const theme = useTheme();
   const pendingUsername = useSessionStore((s) => s.pendingUsername);
+  const confirmRef = useRef<TextInputInstance>(null);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
@@ -27,6 +29,13 @@ export default function NewPasswordScreen() {
       await completeNewPassword(password);
       router.replace('/');
     } catch (e) {
+      // the sign-in session expires after a few minutes – start over from the sign-in screen
+      if ((e as { name?: string })?.name === 'SignInException' || /session/i.test((e as Error)?.message ?? '')) {
+        useSessionStore.getState().setPendingUsername(null);
+        toast.info(t('auth.errors.sessionExpired'));
+        router.replace('/(auth)/sign-in');
+        return;
+      }
       setError(t(authErrorKey(e)));
     } finally {
       setBusy(false);
@@ -34,18 +43,34 @@ export default function NewPasswordScreen() {
   };
 
   return (
-    <Screen scroll keyboard maxWidth={480} back title={t('auth.newPasswordTitle')}>
-      <View style={{ gap: theme.spacing.lg, paddingTop: theme.spacing.lg }}>
-        <Text color="textMuted">{t('auth.newPasswordSubtitle')}</Text>
-        {pendingUsername ? (
-          <Text variant="captionStrong" color="textMuted">
-            {t('auth.schoolId')}: {pendingUsername}
-          </Text>
-        ) : null}
-        <Input label={t('auth.newPassword')} value={password} onChangeText={setPassword} secureTextEntry autoComplete="new-password" textContentType="newPassword" helper={t('auth.passwordRules')} />
-        <Input label={t('auth.confirmPassword')} value={confirm} onChangeText={setConfirm} secureTextEntry autoComplete="new-password" error={error} onSubmitEditing={submit} returnKeyType="go" />
-        <Button title={t('auth.setPassword')} onPress={submit} loading={busy} size="lg" fullWidth />
-      </View>
-    </Screen>
+    <AuthShell icon="shield-checkmark" title={t('auth.newPasswordTitle')} subtitle={t('auth.newPasswordSubtitle')}>
+      {pendingUsername ? <IdentityChip label={t('auth.username')} value={pendingUsername} /> : null}
+      <Input
+        label={t('auth.newPassword')}
+        value={password}
+        onChangeText={setPassword}
+        secureTextEntry
+        autoComplete="new-password"
+        textContentType="newPassword"
+        leftIcon="lock-closed-outline"
+        returnKeyType="next"
+        submitBehavior="submit"
+        onSubmitEditing={() => confirmRef.current?.focus()}
+      />
+      <PasswordRules password={password} />
+      <Input
+        ref={confirmRef}
+        label={t('auth.confirmPassword')}
+        value={confirm}
+        onChangeText={setConfirm}
+        secureTextEntry
+        autoComplete="new-password"
+        leftIcon="lock-closed-outline"
+        error={error}
+        onSubmitEditing={submit}
+        returnKeyType="go"
+      />
+      <Button title={t('auth.setPassword')} onPress={submit} loading={busy} size="lg" fullWidth iconRight="arrow-forward" />
+    </AuthShell>
   );
 }

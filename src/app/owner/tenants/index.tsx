@@ -80,7 +80,7 @@ export default function OwnerTenants() {
           renderItem={({ item }) => (
             <TenantItem
               row={item}
-              onPress={() => router.push({ pathname: '/(owner)/tenants/[tenantId]', params: { tenantId: item.id, type: item.type } } as never)}
+              onPress={() => router.push({ pathname: '/owner/tenants/[tenantId]', params: { tenantId: item.id, type: item.type } } as never)}
             />
           )}
           ListEmptyComponent={

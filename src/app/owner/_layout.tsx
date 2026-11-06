@@ -5,7 +5,8 @@ import type { BottomTabBarProps } from 'expo-router/tabs';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AppTabBar, Text, useTheme, type TabSpec } from '../../ui';
+import { AppTabBar, Avatar, Text, useTheme, type TabSpec } from '../../ui';
+import { useSession } from '../../lib/auth/session';
 import { useBranding } from '../../features/branding';
 import { StorageImage } from '../../components/media/StorageImage';
 
@@ -52,6 +53,7 @@ function OwnerSidebar({ state, emitter, navigateToTab }: BottomTabBarProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const branding = useBranding();
+  const session = useSession();
   const current = state.routes[state.index]?.name;
 
   const go = (name: string) => {
@@ -104,12 +106,21 @@ function OwnerSidebar({ state, emitter, navigateToTab }: BottomTabBarProps) {
         accessibilityRole="tab"
         accessibilityState={{ selected: current === 'more' }}
         onPress={() => go('more')}
-        style={({ pressed }) => [styles.item, { marginHorizontal: 12, borderRadius: theme.radius.lg, backgroundColor: current === 'more' ? theme.colors.primarySoft : pressed ? theme.colors.surfaceAlt : 'transparent' }]}
+        style={({ pressed }) => [
+          styles.account,
+          { borderColor: theme.colors.border, backgroundColor: current === 'more' ? theme.colors.primarySoft : pressed ? theme.colors.surfaceAlt : theme.colors.background },
+        ]}
       >
-        <Ionicons name="person-circle-outline" size={22} color={current === 'more' ? theme.colors.primary : theme.colors.textMuted} />
-        <Text variant={current === 'more' ? 'bodyStrong' : 'body'} color={current === 'more' ? 'primary' : 'text'}>
-          {t('owner.more.account')}
-        </Text>
+        <Avatar name={session.name || session.email || session.username || '?'} size={38} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text variant="bodyStrong" numberOfLines={1}>
+            {session.name || session.username || t('owner.more.account')}
+          </Text>
+          <Text variant="caption" color="textMuted" numberOfLines={1}>
+            {session.email || t('owner.more.role')}
+          </Text>
+        </View>
+        <Ionicons name="settings-outline" size={18} color={current === 'more' ? theme.colors.primary : theme.colors.textMuted} />
       </Pressable>
     </View>
   );
@@ -120,4 +131,5 @@ const styles = StyleSheet.create({
   brand: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingBottom: 6 },
   logo: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   item: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, minHeight: 46 },
+  account: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 12, padding: 10, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth },
 });

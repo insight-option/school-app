@@ -66,9 +66,9 @@ export default function OwnerBilling() {
 
   const action =
     tab === 'invoices' ? (
-      <Button title={t('owner.billing.newInvoice')} icon="add" size="sm" onPress={() => router.push('/(owner)/billing/invoice' as never)} />
+      <Button title={t('owner.billing.newInvoice')} icon="add" size="sm" onPress={() => router.push('/owner/billing/invoice' as never)} />
     ) : tab === 'plans' ? (
-      <Button title={t('owner.billing.newPlan')} icon="add" size="sm" onPress={() => router.push('/(owner)/billing/plan' as never)} />
+      <Button title={t('owner.billing.newPlan')} icon="add" size="sm" onPress={() => router.push('/owner/billing/plan' as never)} />
     ) : undefined;
 
   const pad = { paddingHorizontal: theme.spacing.lg };
@@ -111,7 +111,7 @@ export default function OwnerBilling() {
                 left={<TenantLogo name={s.tenantName} size={42} />}
                 right={<Badge label={t(`owner.subStatus.${s.status}`)} tone={SUB_TONE[s.status] ?? 'neutral'} size="sm" />}
                 chevron
-                onPress={() => router.push({ pathname: '/(owner)/tenants/[tenantId]', params: { tenantId: s.tenantId, type: s.tenantType } } as never)}
+                onPress={() => router.push({ pathname: '/owner/tenants/[tenantId]', params: { tenantId: s.tenantId, type: s.tenantType } } as never)}
               />
             )}
             ListEmptyComponent={<EmptyState icon="card-outline" title={t('owner.billing.noSubscriptions')} body={t('owner.billing.noSubscriptionsBody')} />}
@@ -161,11 +161,11 @@ export default function OwnerBilling() {
                   left={<TenantLogo name={inv.tenantName} size={42} />}
                   right={<Badge label={t(`owner.invoiceStatus.${st}`)} tone={INVOICE_TONE[st] ?? 'neutral'} size="sm" />}
                   chevron
-                  onPress={() => router.push({ pathname: '/(owner)/billing/invoice', params: { id: inv.id } } as never)}
+                  onPress={() => router.push({ pathname: '/owner/billing/invoice', params: { id: inv.id } } as never)}
                 />
               );
             }}
-            ListEmptyComponent={<EmptyState icon="receipt-outline" title={t('owner.billing.noInvoices')} actionLabel={t('owner.billing.newInvoice')} onAction={() => router.push('/(owner)/billing/invoice' as never)} />}
+            ListEmptyComponent={<EmptyState icon="receipt-outline" title={t('owner.billing.noInvoices')} actionLabel={t('owner.billing.newInvoice')} onAction={() => router.push('/owner/billing/invoice' as never)} />}
             refreshControl={<RefreshControl refreshing={invoices.isRefetching} onRefresh={() => void invoices.refetch()} tintColor={theme.colors.primary} />}
             contentContainerStyle={{ paddingBottom: theme.spacing.xxxl }}
           />
@@ -183,11 +183,11 @@ export default function OwnerBilling() {
         ) : plans.data?.length ? (
           <Grid columns={width >= 900 ? 3 : width >= 600 ? 2 : 1}>
             {plans.data.map((p) => (
-              <PlanCard key={p.id} plan={p} onPress={() => router.push({ pathname: '/(owner)/billing/plan', params: { id: p.id } } as never)} />
+              <PlanCard key={p.id} plan={p} onPress={() => router.push({ pathname: '/owner/billing/plan', params: { id: p.id } } as never)} />
             ))}
           </Grid>
         ) : (
-          <EmptyState icon="layers-outline" title={t('owner.billing.noPlans')} body={t('owner.billing.noPlansBody')} actionLabel={t('owner.billing.newPlan')} onAction={() => router.push('/(owner)/billing/plan' as never)} />
+          <EmptyState icon="layers-outline" title={t('owner.billing.noPlans')} body={t('owner.billing.noPlansBody')} actionLabel={t('owner.billing.newPlan')} onAction={() => router.push('/owner/billing/plan' as never)} />
         )}
       </View>
     </Screen>

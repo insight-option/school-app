@@ -150,11 +150,11 @@ describe('platform roles', () => {
     expect(roleFromGroups(['CUSTOMER'])).toBe('CUSTOMER');
     expect(roleFromGroups(['PARTNER', 'biz-abc'])).toBe('PARTNER');
     expect(roleFromGroups(['ADMIN', 'OWNER'])).toBe('OWNER');
-    expect(homeRouteForRole('OWNER')).toBe('/(owner)/overview');
+    expect(homeRouteForRole('OWNER')).toBe('/owner/overview');
     expect(homeRouteForRole('PARTNER')).toBe('/(partner)/dashboard');
     expect(homeRouteForRole('CUSTOMER')).toBe('/(customer)/(tabs)/explore');
-    expect(canAccessWorkspace('CUSTOMER', '(owner)')).toBe(false);
-    expect(canAccessWorkspace('OWNER', '(owner)')).toBe(true);
+    expect(canAccessWorkspace('CUSTOMER', 'owner')).toBe(false);
+    expect(canAccessWorkspace('OWNER', 'owner')).toBe(true);
   });
 });
 

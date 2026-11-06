@@ -3,9 +3,9 @@ import type { Role } from '../data/client';
 /** Pure helpers for role → workspace routing (unit-tested). */
 export const ROLE_PRECEDENCE: Role[] = ['OWNER', 'ADMIN', 'PARTNER', 'TEACHER', 'DRIVER', 'STUDENT', 'CUSTOMER'];
 
-export type WorkspaceGroup = '(owner)' | '(admin)' | '(partner)' | '(teacher)' | '(driver)' | '(student)' | '(customer)';
+export type WorkspaceGroup = 'owner' | '(admin)' | '(partner)' | '(teacher)' | '(driver)' | '(student)' | '(customer)';
 
-const GUARDED: WorkspaceGroup[] = ['(owner)', '(admin)', '(partner)', '(teacher)', '(driver)', '(student)', '(customer)'];
+const GUARDED: WorkspaceGroup[] = ['owner', '(admin)', '(partner)', '(teacher)', '(driver)', '(student)', '(customer)'];
 
 export function roleFromGroups(groups: readonly string[] | null | undefined): Role | null {
   if (!groups?.length) return null;
@@ -16,7 +16,7 @@ export function roleFromGroups(groups: readonly string[] | null | undefined): Ro
 export function workspaceForRole(role: Role | null | undefined): WorkspaceGroup | null {
   switch (role) {
     case 'OWNER':
-      return '(owner)';
+      return 'owner';
     case 'ADMIN':
       return '(admin)';
     case 'PARTNER':
@@ -37,7 +37,7 @@ export function workspaceForRole(role: Role | null | undefined): WorkspaceGroup 
 export function homeRouteForRole(role: Role | null | undefined): string {
   switch (role) {
     case 'OWNER':
-      return '/(owner)/overview';
+      return '/owner/overview';
     case 'ADMIN':
       return '/(admin)/dashboard';
     case 'PARTNER':

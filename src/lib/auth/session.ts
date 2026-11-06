@@ -14,7 +14,7 @@ import {
 } from 'aws-amplify/auth';
 import { create } from 'zustand';
 import { IS_EXPO_GO } from '../runtime';
-import { client, humanizeError, type Role } from '../data/client';
+import { client, humanizeError, publicClient, type Role } from '../data/client';
 import { isSchoolRole, roleFromGroups } from './routing';
 
 export type SessionStatus = 'loading' | 'signedOut' | 'signedIn';
@@ -143,15 +143,52 @@ export function startAuthListener() {
 
 export type SignInResult = { step: 'DONE' } | { step: 'NEW_PASSWORD' } | { step: 'CONFIRM_SIGN_UP' } | { step: 'OTHER'; name: string };
 
+const looksLikeEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+
+/**
+ * Owner and staff accounts created in the Cognito console (or by a school office) have a username
+ * that is not their e-mail address; the backend resolves it (see amplify/functions/platform/signin.ts).
+ */
+async function usernameForEmail(email: string): Promise<string | null> {
+  try {
+    const res = await publicClient.queries.signInName({ email });
+    return typeof res.data === 'string' && res.data ? res.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Wrong username or password (as opposed to a disabled account, an expired temporary password …). */
+const isBadCredentials = (e: unknown) => {
+  const name = (e as { name?: string })?.name;
+  return name === 'UserNotFoundException' || (name === 'NotAuthorizedException' && !/disabled|expired|attempts/i.test((e as Error)?.message ?? ''));
+};
+
 export async function signInWithId(username: string, password: string): Promise<SignInResult> {
-  // Expo Go lacks Amplify's native SRP module, so previews use the plain password flow (TLS-protected).
   const id = username.trim();
+  try {
+    return await attemptSignIn(id, password);
+  } catch (e) {
+    if (!looksLikeEmail(id) || !isBadCredentials(e)) throw e;
+    const name = await usernameForEmail(id);
+    if (!name) throw e;
+    return attemptSignIn(name, password);
+  }
+}
+
+async function attemptSignIn(id: string, password: string): Promise<SignInResult> {
+  // Expo Go lacks Amplify's native SRP module, so previews use the plain password flow (TLS-protected).
+  const start = () => signIn({ username: id, password, options: { authFlowType: IS_EXPO_GO ? 'USER_PASSWORD_AUTH' : 'USER_SRP_AUTH' } });
   let res;
   try {
-    res = await signIn({ username: id, password, options: { authFlowType: IS_EXPO_GO ? 'USER_PASSWORD_AUTH' : 'USER_SRP_AUTH' } });
+    res = await start();
   } catch (e) {
-    if ((e as { name?: string }).name === 'UserNotConfirmedException') return { step: 'CONFIRM_SIGN_UP' };
-    throw e;
+    const name = (e as { name?: string }).name;
+    if (name === 'UserNotConfirmedException') return { step: 'CONFIRM_SIGN_UP' };
+    if (name !== 'UserAlreadyAuthenticatedException') throw e;
+    // Tokens left from an earlier session (e.g. a refresh that failed offline): end it and retry once.
+    await signOut().catch(() => undefined);
+    res = await start();
   }
   if (res.isSignedIn) {
     await bootstrapSession();
@@ -208,10 +245,14 @@ export async function resendOwnerCode(email: string): Promise<void> {
   await resendSignUpCode({ username: ownerUsername(email) });
 }
 
-export async function requestPasswordReset(username: string): Promise<{ destination?: string }> {
-  const res = await resetPassword({ username: username.trim() });
+/** Returns the username the code was sent for – pass it to confirmPasswordReset. */
+export async function requestPasswordReset(username: string): Promise<{ destination?: string; username: string }> {
+  const id = username.trim();
+  // Cognito pretends to send a code for unknown usernames, so an owner/staff e-mail is resolved first.
+  const resolved = (looksLikeEmail(id) && (await usernameForEmail(id))) || id;
+  const res = await resetPassword({ username: resolved });
   const d = res.nextStep.resetPasswordStep === 'CONFIRM_RESET_PASSWORD_WITH_CODE' ? res.nextStep.codeDeliveryDetails?.destination : undefined;
-  return { destination: d };
+  return { destination: d, username: resolved };
 }
 
 export async function confirmPasswordReset(username: string, code: string, newPassword: string): Promise<void> {
@@ -238,6 +279,8 @@ export function authErrorKey(e: unknown): string {
   if (name === 'NotAuthorizedException') {
     if (/disabled/i.test(message)) return 'auth.errors.userDisabled';
     if (/expired/i.test(message)) return 'auth.errors.tempExpired';
+    if (/attempts exceeded/i.test(message)) return 'auth.errors.tooMany';
+    if (/current state/i.test(message)) return 'auth.errors.tempPasswordFirst';
     return 'auth.errors.invalidCredentials';
   }
   if (name === 'UserNotFoundException') return 'auth.errors.invalidCredentials';
